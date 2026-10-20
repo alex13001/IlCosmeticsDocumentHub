@@ -67,18 +67,58 @@ export async function getSiteId(): Promise<string> {
   return siteIdCache;
 }
 
+/** Thrown when the site is reachable but Graph exposes none of the Document Hub libraries. */
+export class NoLibraryError extends Error {
+  constructor(public seen: string[]) {
+    super(
+      seen.length
+        ? `Aucune bibliothèque Document Hub visible. Graph renvoie : ${seen.join(', ')}.`
+        : "Le site répond mais aucune bibliothèque n'est visible : l'accès Sites.Selected de l'application ILC-DocHub au site n'est pas (ou pas encore) accordé.",
+    );
+  }
+}
+
+type GList = { id: string; displayName: string; name?: string; webUrl?: string };
+
+function matchLibrary(c: { displayName?: string; name?: string; webUrl?: string }): string | undefined {
+  const tail = c.webUrl ? decodeURIComponent(c.webUrl.replace(/\/(Forms\/.*)?$/, '').split('/').pop() ?? '') : '';
+  const candidates = [c.displayName, c.name, tail].filter(Boolean).map((x) => x!.toLowerCase());
+  return DOC_LIBRARIES.find((n) => candidates.includes(n.toLowerCase()));
+}
+
 /** Libraries the user can see. Security-trimmed by SharePoint: a library missing here is not accessible. */
 export async function getLibraries(): Promise<Library[]> {
   const siteId = await getSiteId();
-  const lists = await gGetAll<{ id: string; displayName: string }>(`/sites/${siteId}/lists?$select=id,displayName`);
-  const ours = lists.filter((l) => DOC_LIBRARIES.includes(l.displayName));
-  const libs = await Promise.all(
-    ours.map(async (l) => {
+  const found = new Map<string, Library>();
+  const seen: string[] = [];
+
+  const lists = await gGetAll<GList>(`/sites/${siteId}/lists?$select=id,displayName,name,webUrl`);
+  seen.push(...lists.map((l) => l.displayName));
+  await Promise.all(
+    lists.map(async (l) => {
+      const key = matchLibrary(l);
+      if (!key) return;
       const d = await gGet<{ id: string }>(`/sites/${siteId}/lists/${l.id}/drive?$select=id`);
-      return { name: l.displayName, listId: l.id, driveId: d.id };
+      found.set(key, { name: key, listId: l.id, driveId: d.id });
     }),
   );
-  return libs.sort((a, b) => DOC_LIBRARIES.indexOf(a.name) - DOC_LIBRARIES.indexOf(b.name));
+
+  if (!found.size) {
+    // Fallback: some permission set-ups expose drives but not lists.
+    const drives = await gGetAll<{ id: string; name: string; webUrl?: string }>(`/sites/${siteId}/drives?$select=id,name,webUrl`);
+    seen.push(...drives.map((d) => d.name).filter((n) => !seen.includes(n)));
+    await Promise.all(
+      drives.map(async (d) => {
+        const key = matchLibrary({ displayName: d.name, webUrl: d.webUrl });
+        if (!key) return;
+        const l = await gGet<{ id: string }>(`/drives/${d.id}/list?$select=id`);
+        found.set(key, { name: key, listId: l.id, driveId: d.id });
+      }),
+    );
+  }
+
+  if (!found.size) throw new NoLibraryError(seen);
+  return [...found.values()].sort((a, b) => DOC_LIBRARIES.indexOf(a.name) - DOC_LIBRARIES.indexOf(b.name));
 }
 
 interface RawItem {
@@ -134,6 +174,12 @@ export function fieldToDate(iso?: string): string {
   const d = new Date(iso);
   const p = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/** Whole days from now until the date (negative = past). */
+export function daysUntil(iso?: string): number | null {
+  if (!iso) return null;
+  return Math.floor((new Date(iso).getTime() - Date.now()) / 86_400_000);
 }
 
 export function fmtDate(iso?: string): string {

@@ -3,6 +3,7 @@ import { RESTRICTED, TYPES_SIGNATURE } from '../config';
 import { CATEGORIES, HR_CATEGORY, subsOf } from '../taxonomy';
 import { currentEmail } from '../auth';
 import { isPdf } from '../pdf';
+import { Badge, Field, STATUT_TONE, Section } from '../ui';
 import {
   DocItem,
   DocVersion,
@@ -124,200 +125,205 @@ export default function DocumentPanel({ doc, docs, onClose, onChanged, onOpen }:
       return `${f.DocCode} annulé.`;
     });
 
+  const tone = STATUT_TONE[f.Statut ?? ''] ?? 'grey';
   return (
     <aside className="panel">
       <div className="panel-head">
-        <div>
-          <div className="mono big">{f.DocCode ?? 'Sans code'}</div>
-          <div className="muted">
-            {doc.library.name}
-            {inRestricted && ' · confidentiel'} · {f.Statut}
+        <div className="panel-head-row">
+          <div>
+            <div className="panel-code">{f.DocCode ?? 'Sans code'}</div>
+            <div className="panel-title">{f.Title}</div>
           </div>
-        </div>
-        <div>
-          <a className="btn" href={doc.webUrl} target="_blank" rel="noreferrer">
-            Ouvrir
-          </a>
-          <button className="link" onClick={onClose}>
-            Fermer
+          <button className="modal-close" onClick={onClose}>
+            ✕
           </button>
+        </div>
+        <div className="panel-actions">
+          <Badge tone={tone}>{f.Statut}</Badge>
+          {inRestricted && <Badge tone="violet">🔒 Confidentiel</Badge>}
+          <a className="btn btn-white" href={doc.webUrl} target="_blank" rel="noreferrer" style={{ marginLeft: 'auto' }}>
+            Ouvrir le PDF ↗
+          </a>
         </div>
       </div>
 
-      {error && <div className="banner error">{error}</div>}
+      <div className="panel-body">
+        {error && <div className="alert t-red">{error}</div>}
 
-      <dl className="facts">
-        <dt>Entité</dt>
-        <dd>{f.Entite}</dd>
-        <dt>Origine</dt>
-        <dd>{f.Origine}</dd>
-        <dt>Signature</dt>
-        <dd>{[f.TypeSignature, fmtDate(f.DateSignature)].filter(Boolean).join(' · ') || '—'}</dd>
-        <dt>Déposé</dt>
-        <dd>
-          {doc.createdBy} · {fmtDate(doc.created)}
-        </dd>
-        <dt>Fichier</dt>
-        <dd>{doc.fileName}</dd>
-      </dl>
-
-      <section>
-        <h3>Fiche</h3>
-        <div className="form one">
-          <label>
-            Objet
-            <input value={title} onChange={(e) => setTitle(e.target.value)} />
-          </label>
-          <label>
-            Catégorie
-            <select
-              value={categorie}
-              onChange={(e) => {
-                setCategorie(e.target.value);
-                setSousCategorie('');
-              }}
-            >
-              {CATEGORIES.map((x) => (
-                <option key={x}>{x}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Sous-catégorie
-            <select value={sousCategorie} onChange={(e) => setSousCategorie(e.target.value)}>
-              <option value="">—</option>
-              {subsOf(categorie).map((x) => (
-                <option key={x}>{x}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Contrepartie
-            <input value={contrepartie} onChange={(e) => setContrepartie(e.target.value)} />
-          </label>
-          <label>
-            Signataires (e-mails)
-            <input value={signataires} onChange={(e) => setSignataires(e.target.value)} />
-          </label>
-          <label>
-            Date d'effet
-            <input type="date" value={dateEffet} onChange={(e) => setDateEffet(e.target.value)} />
-          </label>
-          <label>
-            Date d'échéance
-            <input type="date" value={dateEcheance} onChange={(e) => setDateEcheance(e.target.value)} />
-          </label>
-          <label>
-            Résumé
-            <textarea rows={4} value={resume} onChange={(e) => setResume(e.target.value)} />
-          </label>
-          <div className="muted small">
-            {f.ResumeValidePar ? `Résumé validé par ${f.ResumeValidePar}` : f.ResumeIA ? 'Résumé non validé' : ''}
-          </div>
-          <div className="row">
-            <button className="primary" disabled={!!busy} onClick={() => void save()}>
-              {busy === 'save' ? 'Enregistrement…' : 'Enregistrer la fiche'}
-            </button>
-            {resume.trim() && !f.ResumeValidePar && (
-              <button disabled={!!busy} onClick={() => void validateResume()}>
-                Valider le résumé
-              </button>
-            )}
-          </div>
+        <div className="info">
+          <div className="info-row"><span className="info-label">Entité</span><span className="info-value">{f.Entite}</span></div>
+          <div className="info-row"><span className="info-label">Bibliothèque</span><span className="info-value">{doc.library.name}</span></div>
+          <div className="info-row"><span className="info-label">Origine</span><span className="info-value">{f.Origine || '—'}</span></div>
+          <div className="info-row"><span className="info-label">Signature</span><span className="info-value">{[f.TypeSignature, fmtDate(f.DateSignature)].filter(Boolean).join(' · ') || '—'}</span></div>
+          <div className="info-row"><span className="info-label">Déposé</span><span className="info-value">{doc.createdBy} · {fmtDate(doc.created)}</span></div>
+          <div className="info-row"><span className="info-label">Fichier</span><span className="info-value small">{doc.fileName}</span></div>
         </div>
-      </section>
 
-      {open && (
-        <section>
-          <h3>Signature</h3>
-          <div className="form one">
-            <label>
-              Message au signataire (facultatif)
-              <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
-            </label>
-            <button disabled={!!busy} onClick={() => void send()}>
-              {busy === 'send' ? 'Envoi…' : f.Statut === 'Envoyé' ? 'Renvoyer au(x) signataire(s)' : 'Envoyer pour signature'}
-            </button>
-            <hr />
-            <label>
-              Scan signé (PDF)
-              <input type="file" accept="application/pdf,.pdf" onChange={(e) => setSignedFile(e.target.files?.[0] ?? null)} />
-            </label>
-            <label>
-              Type de signature
-              <select value={typeSignature} onChange={(e) => setTypeSignature(e.target.value)}>
-                {TYPES_SIGNATURE.map((x) => (
-                  <option key={x}>{x}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Date de signature
-              <input type="date" value={dateSignature} onChange={(e) => setDateSignature(e.target.value)} />
-            </label>
-            <button className="primary" disabled={!!busy || !signedFile} onClick={() => void uploadSigned()}>
-              {busy === 'signed' ? 'Envoi…' : 'Enregistrer la version signée'}
-            </button>
-            <div className="muted small">Vérifiez que le code {f.DocCode} est visible sur le scan avant d'enregistrer.</div>
-          </div>
-        </section>
-      )}
-
-      {(parent || children.length > 0) && (
-        <section>
-          <h3>Documents liés</h3>
-          <ul className="links">
-            {parent && (
-              <li>
-                Parent :{' '}
-                <button className="link" onClick={() => onOpen(`${parent.library.name}/${parent.itemId}`)}>
-                  {parent.fields.DocCode} — {parent.fields.Title}
+        {open && (
+          <Section title="Signature">
+            <div className="stack">
+              <Field label="Signataires (e-mails)">
+                <input value={signataires} onChange={(e) => setSignataires(e.target.value)} />
+              </Field>
+              <Field label="Message au signataire (facultatif)">
+                <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
+              </Field>
+              <div className="row">
+                <button className="btn btn-info" disabled={!!busy} onClick={() => void send()}>
+                  {busy === 'send' ? 'Envoi…' : f.Statut === 'Envoyé' ? '📨 Renvoyer au(x) signataire(s)' : '📨 Envoyer pour signature'}
                 </button>
-              </li>
-            )}
-            {children.map((c) => (
-              <li key={c.itemId}>
-                Lié :{' '}
-                <button className="link" onClick={() => onOpen(`${c.library.name}/${c.itemId}`)}>
-                  {c.fields.DocCode} — {c.fields.Title}
+              </div>
+              <hr className="divider" />
+              <Field label="Scan signé (PDF)">
+                <input type="file" accept="application/pdf,.pdf" onChange={(e) => setSignedFile(e.target.files?.[0] ?? null)} />
+              </Field>
+              <div className="grid2">
+                <Field label="Type de signature">
+                  <select value={typeSignature} onChange={(e) => setTypeSignature(e.target.value)}>
+                    {TYPES_SIGNATURE.map((x) => (
+                      <option key={x}>{x}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Date de signature">
+                  <input type="date" value={dateSignature} onChange={(e) => setDateSignature(e.target.value)} />
+                </Field>
+              </div>
+              <div className="row">
+                <button className="btn btn-primary" disabled={!!busy || !signedFile} onClick={() => void uploadSigned()}>
+                  {busy === 'signed' ? 'Envoi…' : '✅ Enregistrer la version signée'}
                 </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      <section>
-        <h3>Historique des versions</h3>
-        <ul className="links">
-          {versions.map((v) => (
-            <li key={v.id}>
-              v{v.id} · {new Date(v.lastModifiedDateTime).toLocaleString('fr-FR')} · {v.by} · {Math.round(v.size / 1024)} Ko
-            </li>
-          ))}
-          {!versions.length && <li className="muted">—</li>}
-        </ul>
-      </section>
-
-      {f.Statut !== 'Annulé' && (
-        <section>
-          {!confirmCancel ? (
-            <button className="danger-link" onClick={() => setConfirmCancel(true)}>
-              Annuler ce document
-            </button>
-          ) : (
-            <div className="row">
-              <span>Le document restera archivé avec le statut Annulé.</span>
-              <button className="danger" disabled={!!busy} onClick={() => void cancelDoc()}>
-                Confirmer l'annulation
-              </button>
-              <button className="link" onClick={() => setConfirmCancel(false)}>
-                Retour
-              </button>
+              </div>
+              <div className="small faint">Vérifiez que le code {f.DocCode} est visible sur le scan avant d'enregistrer.</div>
             </div>
+          </Section>
+        )}
+
+        <Section title="Fiche">
+          <div className="stack">
+            <Field label="Objet">
+              <input value={title} onChange={(e) => setTitle(e.target.value)} />
+            </Field>
+            <div className="grid2">
+              <Field label="Catégorie">
+                <select
+                  value={categorie}
+                  onChange={(e) => {
+                    setCategorie(e.target.value);
+                    setSousCategorie('');
+                  }}
+                >
+                  {CATEGORIES.map((x) => (
+                    <option key={x}>{x}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Sous-catégorie">
+                <select value={sousCategorie} onChange={(e) => setSousCategorie(e.target.value)}>
+                  <option value="">—</option>
+                  {subsOf(categorie).map((x) => (
+                    <option key={x}>{x}</option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+            <Field label="Contrepartie">
+              <input value={contrepartie} onChange={(e) => setContrepartie(e.target.value)} />
+            </Field>
+            {!open && (
+              <Field label="Signataires (e-mails)">
+                <input value={signataires} onChange={(e) => setSignataires(e.target.value)} />
+              </Field>
+            )}
+            <div className="grid2">
+              <Field label="Date d'effet">
+                <input type="date" value={dateEffet} onChange={(e) => setDateEffet(e.target.value)} />
+              </Field>
+              <Field label="Date d'échéance">
+                <input type="date" value={dateEcheance} onChange={(e) => setDateEcheance(e.target.value)} />
+              </Field>
+            </div>
+            <Field label="Résumé">
+              <textarea rows={4} value={resume} onChange={(e) => setResume(e.target.value)} />
+            </Field>
+            {(f.ResumeIA || f.ResumeValidePar) && (
+              <div>
+                {f.ResumeValidePar ? <Badge tone="green" small>✓ Résumé validé par {f.ResumeValidePar}</Badge> : <Badge tone="orange" small>Résumé non validé</Badge>}
+              </div>
+            )}
+            <div className="row">
+              <button className="btn btn-primary" disabled={!!busy} onClick={() => void save()}>
+                {busy === 'save' ? 'Enregistrement…' : 'Enregistrer la fiche'}
+              </button>
+              {resume.trim() && !f.ResumeValidePar && (
+                <button className="btn btn-ghost" disabled={!!busy} onClick={() => void validateResume()}>
+                  Valider le résumé
+                </button>
+              )}
+            </div>
+          </div>
+        </Section>
+
+        {(parent || children.length > 0) && (
+          <Section title="Documents liés">
+            <div className="stack">
+              {parent && (
+                <div className="small">
+                  Parent :{' '}
+                  <button className="link-btn" onClick={() => onOpen(`${parent.library.name}/${parent.itemId}`)}>
+                    {parent.fields.DocCode} — {parent.fields.Title}
+                  </button>
+                </div>
+              )}
+              {children.map((c) => (
+                <div key={c.itemId} className="small">
+                  Lié :{' '}
+                  <button className="link-btn" onClick={() => onOpen(`${c.library.name}/${c.itemId}`)}>
+                    {c.fields.DocCode} — {c.fields.Title}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </Section>
+        )}
+
+        <Section title="Historique des versions">
+          {versions.length ? (
+            <ul className="timeline">
+              {versions.map((v) => (
+                <li key={v.id}>
+                  <b>v{v.id}</b> · {new Date(v.lastModifiedDateTime).toLocaleString('fr-FR')}
+                  <div className="faint">{v.by} · {Math.round(v.size / 1024)} Ko</div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="small faint">—</div>
           )}
-        </section>
-      )}
+        </Section>
+
+        {f.Statut !== 'Annulé' && (
+          <Section title="Zone sensible">
+            {!confirmCancel ? (
+              <button className="btn btn-danger" onClick={() => setConfirmCancel(true)}>
+                Annuler ce document
+              </button>
+            ) : (
+              <div className="stack">
+                <div className="small muted">Le document reste archivé avec le statut « Annulé ». Seul un administrateur peut le supprimer.</div>
+                <div className="row">
+                  <button className="btn btn-danger-solid" disabled={!!busy} onClick={() => void cancelDoc()}>
+                    Confirmer l'annulation
+                  </button>
+                  <button className="link-btn" onClick={() => setConfirmCancel(false)}>
+                    Retour
+                  </button>
+                </div>
+              </div>
+            )}
+          </Section>
+        )}
+      </div>
     </aside>
   );
 }

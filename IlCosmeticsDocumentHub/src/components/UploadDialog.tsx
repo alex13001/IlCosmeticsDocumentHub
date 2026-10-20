@@ -3,6 +3,7 @@ import { ENTITIES, ORIGINES, RESTRICTED, TYPES_SIGNATURE } from '../config';
 import { CATEGORIES, HR_CATEGORY, subsOf } from '../taxonomy';
 import { DocItem, Library, createDocument, parseEmails } from '../docs';
 import { isPdf } from '../pdf';
+import { Badge, Field, Section } from '../ui';
 
 interface Props {
   libs: Library[];
@@ -17,6 +18,7 @@ export default function UploadDialog({ libs, docs, onClose, onDone }: Props) {
   const entityChoices = ENTITIES.filter((e) => libByName.has(e) || hasRestricted);
 
   const [file, setFile] = useState<File | null>(null);
+  const [over, setOver] = useState(false);
   const [mode, setMode] = useState<'aSigner' | 'signe'>('aSigner');
   const [entite, setEntite] = useState<string>(entityChoices[0] ?? '');
   const [categorie, setCategorie] = useState('');
@@ -40,13 +42,19 @@ export default function UploadDialog({ libs, docs, onClose, onDone }: Props) {
   const target = libByName.get(targetName);
   const parentCandidates = docs.filter((d) => d.library.name === targetName && d.fields.DocCode && d.fields.Entite === entite);
 
+  const pickFile = (f: File | null | undefined) => {
+    if (!f) return;
+    setFile(f);
+    if (!title) setTitle(f.name.replace(/\.pdf$/i, '').replace(/[_-]+/g, ' ').trim());
+  };
+
   const problems: string[] = [];
-  if (!file) problems.push('Fichier PDF manquant');
+  if (!file) problems.push('Ajoutez le fichier PDF');
   else if (!isPdf(file)) problems.push('Seuls les PDF sont acceptés');
-  if (!entite) problems.push('Entité manquante');
-  if (!categorie) problems.push('Catégorie manquante');
-  if (!title.trim()) problems.push('Objet manquant');
-  if (mode === 'signe' && !dateSignature) problems.push('Date de signature manquante');
+  if (!entite) problems.push('Choisissez l’entité');
+  if (!title.trim()) problems.push('Renseignez l’objet');
+  if (!categorie) problems.push('Choisissez la catégorie');
+  if (mode === 'signe' && !dateSignature) problems.push('Renseignez la date de signature');
   if (signataires && !parseEmails(signataires).length) problems.push('E-mails des signataires invalides');
   if (!target) {
     problems.push(
@@ -87,149 +95,167 @@ export default function UploadDialog({ libs, docs, onClose, onDone }: Props) {
   }
 
   return (
-    <div className="modal-bg">
+    <div className="overlay">
       <div className="modal">
         <div className="modal-head">
           <h2>Déposer un document</h2>
-          <button className="link" onClick={onClose} disabled={busy}>
-            Fermer
+          <button className="modal-close" onClick={onClose} disabled={busy}>
+            ✕ Fermer
           </button>
         </div>
 
-        <div className="form">
-          <label className="full">
-            Fichier PDF
-            <input type="file" accept="application/pdf,.pdf" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-          </label>
-
-          <div className="full radios">
-            <label>
-              <input type="radio" checked={mode === 'aSigner'} onChange={() => setMode('aSigner')} /> À signer (le code sera apposé sur le PDF)
-            </label>
-            <label>
-              <input type="radio" checked={mode === 'signe'} onChange={() => setMode('signe')} /> Déjà signé (archivage)
-            </label>
-          </div>
-
-          <label>
-            Entité
-            <select value={entite} onChange={(e) => setEntite(e.target.value)}>
-              {entityChoices.map((x) => (
-                <option key={x}>{x}</option>
-              ))}
-            </select>
-          </label>
-
-          <label>
-            Objet
-            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ex. Contrat de leasing ligne 3" />
-          </label>
-
-          <label>
-            Catégorie
-            <select
-              value={categorie}
-              onChange={(e) => {
-                setCategorie(e.target.value);
-                setSousCategorie('');
-              }}
-            >
-              <option value="">—</option>
-              {CATEGORIES.map((x) => (
-                <option key={x}>{x}</option>
-              ))}
-            </select>
-          </label>
-
-          <label>
-            Sous-catégorie
-            <select value={sousCategorie} onChange={(e) => setSousCategorie(e.target.value)} disabled={!categorie}>
-              <option value="">—</option>
-              {subsOf(categorie).map((x) => (
-                <option key={x}>{x}</option>
-              ))}
-            </select>
-          </label>
-
-          {hasRestricted && (
-            <label className="full check">
-              <input type="checkbox" checked={isHR || confidentiel} disabled={isHR} onChange={(e) => setConfidentiel(e.target.checked)} />
-              Confidentiel (bibliothèque Restricted, Direction uniquement){isHR ? ' — obligatoire pour les RH' : ''}
-            </label>
-          )}
-
-          <label>
-            Contrepartie
-            <input value={contrepartie} onChange={(e) => setContrepartie(e.target.value)} />
-          </label>
-
-          <label>
-            Signataires (e-mails, séparés par ;)
-            <input value={signataires} onChange={(e) => setSignataires(e.target.value)} placeholder="jf.harpes@ilcosmetics.com" />
-          </label>
-
-          <label>
-            Type de signature
-            <select value={typeSignature} onChange={(e) => setTypeSignature(e.target.value)}>
-              {TYPES_SIGNATURE.map((x) => (
-                <option key={x}>{x}</option>
-              ))}
-            </select>
-          </label>
-
-          {mode === 'signe' && (
-            <>
-              <label>
-                Date de signature
-                <input type="date" value={dateSignature} onChange={(e) => setDateSignature(e.target.value)} />
+        <div className="modal-body">
+          <Section title="Fichier">
+            {file ? (
+              <div className="file-ok">
+                📄 {file.name} <span className="small">({Math.round(file.size / 1024)} Ko)</span>
+                <button className="remove" onClick={() => setFile(null)} title="Retirer">
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <label
+                className={`dropzone${over ? ' over' : ''}`}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setOver(true);
+                }}
+                onDragLeave={() => setOver(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setOver(false);
+                  pickFile(e.dataTransfer.files?.[0]);
+                }}
+              >
+                <input type="file" accept="application/pdf,.pdf" onChange={(e) => pickFile(e.target.files?.[0])} />
+                <div className="dropzone-icon">📥</div>
+                <div>
+                  Glissez le PDF ici ou <strong>cliquez pour choisir</strong>
+                </div>
               </label>
-              <label>
-                Origine
-                <select value={origine} onChange={(e) => setOrigine(e.target.value)}>
-                  {ORIGINES.map((x) => (
+            )}
+            <div className="modes" style={{ marginTop: 12 }}>
+              <button type="button" className={`mode${mode === 'aSigner' ? ' on' : ''}`} onClick={() => setMode('aSigner')}>
+                <div className="mode-title">✍️ À signer</div>
+                <div className="mode-sub">Le code est apposé sur chaque page, puis le PDF est envoyé au signataire.</div>
+              </button>
+              <button type="button" className={`mode${mode === 'signe' ? ' on' : ''}`} onClick={() => setMode('signe')}>
+                <div className="mode-title">✅ Déjà signé</div>
+                <div className="mode-sub">Archivage d’un document signé. Le PDF n’est pas modifié.</div>
+              </button>
+            </div>
+          </Section>
+
+          <Section title="Classement" right={<Badge tone={targetName === RESTRICTED ? 'violet' : 'green'}>Destination : {targetName === RESTRICTED ? '🔒 Restricted' : targetName}</Badge>}>
+            <div className="grid2">
+              <Field label="Entité" required>
+                <select value={entite} onChange={(e) => setEntite(e.target.value)}>
+                  {entityChoices.map((x) => (
                     <option key={x}>{x}</option>
                   ))}
                 </select>
-              </label>
-            </>
-          )}
+              </Field>
+              <Field label="Objet" required>
+                <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ex. Contrat de leasing ligne 3" />
+              </Field>
+              <Field label="Catégorie" required>
+                <select
+                  value={categorie}
+                  onChange={(e) => {
+                    setCategorie(e.target.value);
+                    setSousCategorie('');
+                  }}
+                >
+                  <option value="">— Choisir —</option>
+                  {CATEGORIES.map((x) => (
+                    <option key={x}>{x}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Sous-catégorie">
+                <select value={sousCategorie} onChange={(e) => setSousCategorie(e.target.value)} disabled={!categorie}>
+                  <option value="">—</option>
+                  {subsOf(categorie).map((x) => (
+                    <option key={x}>{x}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Contrepartie" full>
+                <input value={contrepartie} onChange={(e) => setContrepartie(e.target.value)} placeholder="Banque, fournisseur, client, administration…" />
+              </Field>
+              {hasRestricted && (
+                <label className={`check full${isHR ? ' locked' : ''}`} style={{ gridColumn: '1 / -1' }}>
+                  <input type="checkbox" checked={isHR || confidentiel} disabled={isHR} onChange={(e) => setConfidentiel(e.target.checked)} />
+                  🔒 Confidentiel — bibliothèque Restricted, visible par la Direction uniquement{isHR ? ' (obligatoire pour les RH)' : ''}
+                </label>
+              )}
+            </div>
+          </Section>
 
-          <label>
-            Date d'effet
-            <input type="date" value={dateEffet} onChange={(e) => setDateEffet(e.target.value)} />
-          </label>
+          <Section title="Signature et dates">
+            <div className="grid3">
+              <Field label="Signataires (e-mails, séparés par ;)" full>
+                <input value={signataires} onChange={(e) => setSignataires(e.target.value)} placeholder="jf.harpes@ilcosmetics.com" />
+              </Field>
+              <Field label="Type de signature">
+                <select value={typeSignature} onChange={(e) => setTypeSignature(e.target.value)}>
+                  {TYPES_SIGNATURE.map((x) => (
+                    <option key={x}>{x}</option>
+                  ))}
+                </select>
+              </Field>
+              {mode === 'signe' && (
+                <>
+                  <Field label="Date de signature" required>
+                    <input type="date" value={dateSignature} onChange={(e) => setDateSignature(e.target.value)} />
+                  </Field>
+                  <Field label="Origine">
+                    <select value={origine} onChange={(e) => setOrigine(e.target.value)}>
+                      {ORIGINES.map((x) => (
+                        <option key={x}>{x}</option>
+                      ))}
+                    </select>
+                  </Field>
+                </>
+              )}
+              <Field label="Date d'effet">
+                <input type="date" value={dateEffet} onChange={(e) => setDateEffet(e.target.value)} />
+              </Field>
+              <Field label="Date d'échéance">
+                <input type="date" value={dateEcheance} onChange={(e) => setDateEcheance(e.target.value)} />
+              </Field>
+            </div>
+          </Section>
 
-          <label>
-            Date d'échéance
-            <input type="date" value={dateEcheance} onChange={(e) => setDateEcheance(e.target.value)} />
-          </label>
-
-          <label className="full">
-            Document parent (avenant, annexe)
-            <select value={parentItemId} onChange={(e) => setParentItemId(e.target.value)}>
-              <option value="">Aucun</option>
-              {parentCandidates.map((d) => (
-                <option key={d.itemId} value={d.itemId}>
-                  {d.fields.DocCode} — {d.fields.Title}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="full">
-            Résumé (saisie manuelle en attendant l'IA)
-            <textarea rows={3} value={resumeIA} onChange={(e) => setResumeIA(e.target.value)} />
-          </label>
+          <Section title="Liens et résumé">
+            <div className="grid2">
+              <Field label="Document parent (avenant, annexe)" full>
+                <select value={parentItemId} onChange={(e) => setParentItemId(e.target.value)}>
+                  <option value="">Aucun</option>
+                  {parentCandidates.map((d) => (
+                    <option key={d.itemId} value={d.itemId}>
+                      {d.fields.DocCode} — {d.fields.Title}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Résumé (saisie manuelle en attendant l'IA)" full>
+                <textarea rows={3} value={resumeIA} onChange={(e) => setResumeIA(e.target.value)} placeholder="Objet, parties, montant, durée, clauses clés…" />
+              </Field>
+            </div>
+          </Section>
         </div>
 
         <div className="modal-foot">
-          <span className="muted">
-            Destination : <b>{targetName}</b>
-          </span>
-          {problems.length > 0 && <span className="muted">{problems[0]}</span>}
-          {error && <span className="error">{error}</span>}
-          <button className="primary" disabled={busy || problems.length > 0} onClick={() => void submit()}>
-            {busy ? 'Enregistrement…' : 'Enregistrer'}
+          {error ? (
+            <span className="small" style={{ color: 'var(--red)', fontWeight: 600 }}>{error}</span>
+          ) : problems.length ? (
+            <span className="small muted">⚠️ {problems[0]}</span>
+          ) : (
+            <span className="small" style={{ color: 'var(--green)', fontWeight: 600 }}>✓ Prêt à enregistrer</span>
+          )}
+          <button className="btn btn-primary" disabled={busy || problems.length > 0} onClick={() => void submit()}>
+            {busy ? 'Enregistrement…' : 'Enregistrer le document'}
           </button>
         </div>
       </div>
