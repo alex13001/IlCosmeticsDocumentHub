@@ -19,3 +19,16 @@ export type Statut = (typeof STATUTS)[number];
 
 export const TYPES_SIGNATURE = ['Manuscrite', 'Électronique'] as const;
 export const ORIGINES = ['Flux', 'Import historique'] as const;
+
+/**
+ * Navigation entre hubs (en-tête). Même liste dans Finance Hub, Document Hub et
+ * Business Hub : à mettre à jour dans les trois applis si une URL change.
+ */
+export const HUB_LINKS = [
+  { id: 'finance', label: 'Finance Hub', url: 'https://ashy-mud-01680b903.2.azurestaticapps.net' },
+  { id: 'document', label: 'Document Hub', url: 'https://brave-plant-01801d910.1.azurestaticapps.net' },
+  { id: 'business', label: 'Business Hub', url: 'https://icy-field-0ed4a7503.6.azurestaticapps.net' },
+] as const;
+
+/** Liens vers les autres hubs : comptes internes uniquement (pas les invités B2B). */
+export const INTERNAL_EMAIL_DOMAIN = '@ilcosmetics.com';

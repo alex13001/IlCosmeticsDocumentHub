@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AccountInfo } from '@azure/msal-browser';
-import { initAuth, login, logout } from './auth';
+import { currentEmail, initAuth, login, logout } from './auth';
 import { DocItem, Library, NoLibraryError, daysUntil, getLibraries, loadDocuments } from './docs';
 import { GraphError } from './graph';
-import { RESTRICTED } from './config';
+import { HUB_LINKS, INTERNAL_EMAIL_DOMAIN, RESTRICTED } from './config';
 import { EmptyState, StatTile } from './ui';
 import DocumentList, { Preset } from './components/DocumentList';
 import UploadDialog from './components/UploadDialog';
@@ -112,6 +112,8 @@ export default function App() {
     );
   }
 
+  const showHubLinks = currentEmail().endsWith(INTERNAL_EMAIL_DOMAIN);
+
   const heroTitle = tab === 'registre' ? 'Registre documentaire' : tab === 'atraiter' ? 'Documents à traiter' : 'Échéances contractuelles';
   const heroSub =
     tab === 'registre'
@@ -123,7 +125,15 @@ export default function App() {
   return (
     <div>
       <div className="header">
-        <div className="header-title">📁 Document Hub</div>
+        <nav className="hubs" aria-label="Applications IL Cosmetics">
+          <span className="hub is-current" aria-current="page">📁 Document Hub</span>
+          {showHubLinks &&
+            HUB_LINKS.filter((hub) => hub.id !== 'document').map((hub) => (
+              <a key={hub.id} className="hub" href={hub.url}>
+                {hub.label}
+              </a>
+            ))}
+        </nav>
         <div className="tabs">
           <button className={`tab${tab === 'registre' ? ' on' : ''}`} onClick={() => go('registre')}>
             Registre
