@@ -65,3 +65,19 @@ export async function getToken(): Promise<string> {
     throw e;
   }
 }
+
+/** A Graph token cannot be used to call our own API: request an API-audience token. */
+export async function getAiApiToken(): Promise<string> {
+  if (!config.aiApiScope) throw new Error('VITE_AI_API_SCOPE manquant : configurez le scope Entra de l’API.');
+  const account = currentAccount();
+  if (!account) throw new Error('Session Entra requise.');
+  try {
+    const r = await msal.acquireTokenSilent({ scopes: [config.aiApiScope], account });
+    return r.accessToken;
+  } catch (e) {
+    if (e instanceof InteractionRequiredAuthError) {
+      await msal.acquireTokenRedirect({ scopes: [config.aiApiScope], account });
+    }
+    throw e;
+  }
+}

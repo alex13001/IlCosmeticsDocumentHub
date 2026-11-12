@@ -3,6 +3,7 @@ import { ENTITIES, ORIGINES, RESTRICTED, TYPES_SIGNATURE } from '../config';
 import { CATEGORIES, HR_CATEGORY, subsOf } from '../taxonomy';
 import { DocItem, Library, createDocument, parseEmails } from '../docs';
 import { isPdf } from '../pdf';
+import { analyzeDocument, type AnalysisResult } from '../ai';
 import { Badge, Field, Section } from '../ui';
 
 interface Props {
@@ -35,6 +36,8 @@ export default function UploadDialog({ libs, docs, onClose, onDone }: Props) {
   const [resumeIA, setResumeIA] = useState('');
   const [parentItemId, setParentItemId] = useState('');
   const [busy, setBusy] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState('');
 
   const isHR = categorie === HR_CATEGORY;
@@ -45,8 +48,32 @@ export default function UploadDialog({ libs, docs, onClose, onDone }: Props) {
   const pickFile = (f: File | null | undefined) => {
     if (!f) return;
     setFile(f);
+    setAnalysis(null);
     if (!title) setTitle(f.name.replace(/\.pdf$/i, '').replace(/[_-]+/g, ' ').trim());
   };
+
+  async function runAnalysis() {
+    if (!file || !isPdf(file)) return;
+    setAnalyzing(true);
+    setError('');
+    try {
+      const a = await analyzeDocument(file);
+      setAnalysis(a);
+      if (a.title) setTitle(a.title);
+      if (a.entite && entityChoices.includes(a.entite as typeof entityChoices[number])) setEntite(a.entite);
+      if (a.categorie && CATEGORIES.includes(a.categorie)) {
+        setCategorie(a.categorie);
+        setSousCategorie(a.sousCategorie && subsOf(a.categorie).includes(a.sousCategorie) ? a.sousCategorie : '');
+      }
+      if (a.contrepartie) setContrepartie(a.contrepartie);
+      if (a.dateSignature) setDateSignature(a.dateSignature);
+      if (a.dateEffet) setDateEffet(a.dateEffet);
+      if (a.dateEcheance) setDateEcheance(a.dateEcheance);
+      if (a.resumeIA) setResumeIA(a.resumeIA);
+      if (a.confidentialite === 'Restricted' || a.categorie === HR_CATEGORY) setConfidentiel(true);
+    } catch (e) { setError((e as Error).message); }
+    finally { setAnalyzing(false); }
+  }
 
   const problems: string[] = [];
   if (!file) problems.push('Ajoutez le fichier PDF');
@@ -65,7 +92,7 @@ export default function UploadDialog({ libs, docs, onClose, onDone }: Props) {
   }
 
   async function submit() {
-    if (problems.length || !file || !target) return;
+    if (problems.length || !file || !target || analyzing) return;
     setBusy(true);
     setError('');
     try {
@@ -109,7 +136,7 @@ export default function UploadDialog({ libs, docs, onClose, onDone }: Props) {
             {file ? (
               <div className="file-ok">
                 📄 {file.name} <span className="small">({Math.round(file.size / 1024)} Ko)</span>
-                <button className="remove" onClick={() => setFile(null)} title="Retirer">
+                <button className="remove" onClick={() => { setFile(null); setAnalysis(null); }} title="Retirer">
                   ✕
                 </button>
               </div>
@@ -133,6 +160,22 @@ export default function UploadDialog({ libs, docs, onClose, onDone }: Props) {
                   Glissez le PDF ici ou <strong>cliquez pour choisir</strong>
                 </div>
               </label>
+            )}
+            <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <button type="button" className="btn btn-primary" disabled={!file || analyzing || busy || !isPdf(file)} onClick={() => void runAnalysis()}>
+                {analyzing ? 'Analyse IA en cours…' : '✨ Analyser avec l’IA'}
+              </button>
+              <span className="small muted">Sur demande uniquement · Vérifiez les propositions avant d'enregistrer.</span>
+            </div>
+            {analysis && (
+              <div style={{ border: '1px solid var(--border, #ddd)', borderRadius: 8, padding: 12, marginTop: 12 }}>
+                <strong>Analyse terminée — informations à valider</strong>
+                {analysis.warning && <p className="small" style={{ color: 'var(--red)' }}>{analysis.warning}</p>}
+                <p className="small">{analysis.justification || 'Vérifiez les dates, la société et le classement proposés.'}</p>
+                {analysis.pointsVigilance.length > 0 && <div className="small"><strong>Points de vigilance :</strong><ul>{analysis.pointsVigilance.map((x, i) => <li key={i}>{x}</li>)}</ul></div>}
+                {analysis.sources.length > 0 && <div className="small"><strong>Sources :</strong> {analysis.sources.join(' · ')}</div>}
+                <p className="small muted">L'IA ne valide ni les signatures ni le caractère officiel du document.</p>
+              </div>
             )}
             <div className="modes" style={{ marginTop: 12 }}>
               <button type="button" className={`mode${mode === 'aSigner' ? ' on' : ''}`} onClick={() => setMode('aSigner')}>
@@ -239,7 +282,7 @@ export default function UploadDialog({ libs, docs, onClose, onDone }: Props) {
                   ))}
                 </select>
               </Field>
-              <Field label="Résumé (saisie manuelle en attendant l'IA)" full>
+              <Field label="Résumé en français (modifiable)" full>
                 <textarea rows={3} value={resumeIA} onChange={(e) => setResumeIA(e.target.value)} placeholder="Objet, parties, montant, durée, clauses clés…" />
               </Field>
             </div>
@@ -254,7 +297,7 @@ export default function UploadDialog({ libs, docs, onClose, onDone }: Props) {
           ) : (
             <span className="small" style={{ color: 'var(--green)', fontWeight: 600 }}>✓ Prêt à enregistrer</span>
           )}
-          <button className="btn btn-primary" disabled={busy || problems.length > 0} onClick={() => void submit()}>
+          <button className="btn btn-primary" disabled={busy || analyzing || problems.length > 0} onClick={() => void submit()}>
             {busy ? 'Enregistrement…' : 'Enregistrer le document'}
           </button>
         </div>

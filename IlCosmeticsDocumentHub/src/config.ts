@@ -1,4 +1,6 @@
 export const config = {
+  aiApiUrl: (import.meta.env.VITE_AI_API_URL || '').replace(/\/$/, ''),
+  aiApiScope: import.meta.env.VITE_AI_API_SCOPE || '', 
   clientId: '51b03139-b873-4456-870b-622e4c2cf3d0',
   authority: 'https://login.microsoftonline.com/ilcosmetics.com',
   siteHost: 'ilcosmetics.sharepoint.com',

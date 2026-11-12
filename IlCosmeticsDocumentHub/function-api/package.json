@@ -1,0 +1,9 @@
+{
+  "name": "ilc-documenthub-ai-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": { "start": "func start" },
+  "dependencies": { "@azure/functions": "^4.7.0", "@azure/identity": "^4.13.0", "jose": "^6.0.0" }
+}
