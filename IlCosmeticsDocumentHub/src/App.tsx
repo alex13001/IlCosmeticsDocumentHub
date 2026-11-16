@@ -114,7 +114,7 @@ export default function App() {
 
   const showHubLinks = currentEmail().endsWith(INTERNAL_EMAIL_DOMAIN);
 
-  const heroTitle = tab === 'registre' ? 'Registre documentaire' : tab === 'atraiter' ? 'Documents à traiter' : 'Échéances contractuelles';
+  const heroTitle = tab === 'registre' ? 'Bibliothèque documentaire' : tab === 'atraiter' ? 'Documents à traiter' : 'Échéances contractuelles';
   const heroSub =
     tab === 'registre'
       ? `${stats.total} document(s) actif(s) · ${libs.length} bibliothèque(s) accessible(s)`
@@ -136,7 +136,7 @@ export default function App() {
         </nav>
         <div className="tabs">
           <button className={`tab${tab === 'registre' ? ' on' : ''}`} onClick={() => go('registre')}>
-            Registre
+            Bibliothèque
           </button>
           <button className={`tab${tab === 'atraiter' ? ' on' : ''}`} onClick={() => go('atraiter')}>
             À traiter

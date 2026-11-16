@@ -3,6 +3,7 @@ import { ENTITIES, RESTRICTED, STATUTS } from '../config';
 import { CATEGORIES } from '../taxonomy';
 import { DocItem, Library, daysUntil, fmtDate } from '../docs';
 import { Badge, EmptyState, STATUT_TONE } from '../ui';
+import '../referentiel.css';
 
 export interface Preset {
   statut?: string;
@@ -19,15 +20,44 @@ interface Props {
 }
 
 type SortKey = 'code' | 'title' | 'entite' | 'categorie' | 'statut' | 'signature' | 'echeance' | 'created';
+type ViewMode = 'explorer' | 'table';
+type TreeMode = 'entity' | 'category';
+const EMPTY = '__not_set__';
+
+function tidy(value?: string): string { return value?.trim() || EMPTY; }
+function displayName(value: string, kind: 'entity' | 'category' | 'sub'): string {
+  if (value === EMPTY) return kind === 'entity' ? 'Entité non renseignée' : kind === 'category' ? 'À classer' : 'Sans sous-catégorie';
+  return kind === 'category' ? value.replace(/^\d+\s*[—–-]\s*/, '') : value;
+}
+function strip(value: string): string {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('fr');
+}
+function keyOf(doc: DocItem) { return `${doc.library.name}/${doc.itemId}`; }
+function ordered(values: string[], known: readonly string[]): string[] {
+  return [...values].sort((a, b) => {
+    if (a === EMPTY) return 1;
+    if (b === EMPTY) return -1;
+    const ai = known.indexOf(a);
+    const bi = known.indexOf(b);
+    if (ai >= 0 && bi >= 0) return ai - bi;
+    if (ai >= 0) return -1;
+    if (bi >= 0) return 1;
+    return a.localeCompare(b, 'fr');
+  });
+}
 
 export default function DocumentList({ docs, libs, tab, preset, selectedKey, onSelect }: Props) {
   const [q, setQ] = useState('');
   const [entite, setEntite] = useState('');
   const [cat, setCat] = useState('');
+  const [sub, setSub] = useState('');
   const [statut, setStatut] = useState('');
   const [lib, setLib] = useState('');
   const [showCancelled, setShowCancelled] = useState(false);
   const [sort, setSort] = useState<{ key: SortKey; asc: boolean }>({ key: 'created', asc: false });
+  const [view, setView] = useState<ViewMode>('explorer');
+  const [treeMode, setTreeMode] = useState<TreeMode>('entity');
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     setStatut(preset.statut ?? '');
@@ -35,14 +65,11 @@ export default function DocumentList({ docs, libs, tab, preset, selectedKey, onS
     setSort(tab === 'echeances' ? { key: 'echeance', asc: true } : { key: 'created', asc: false });
   }, [preset, tab]);
 
-  const entityChips = useMemo(() => {
-    const accessible = new Set(libs.map((l) => l.name));
-    return ENTITIES.filter((e) => accessible.has(e) || docs.some((d) => d.fields.Entite === e));
-  }, [libs, docs]);
-
-  const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    const rows = docs.filter((d) => {
+  // The tree is a virtual hierarchy of metadata, not SharePoint folders.
+  // The underlying access controls and document URLs are unchanged.
+  const base = useMemo(() => {
+    const needle = strip(q.trim());
+    return docs.filter((d) => {
       const f = d.fields;
       if (tab === 'atraiter' && f.Statut !== 'À signer' && f.Statut !== 'Envoyé') return false;
       if (tab === 'echeances') {
@@ -50,20 +77,22 @@ export default function DocumentList({ docs, libs, tab, preset, selectedKey, onS
         if (n === null || n > 90 || f.Statut === 'Annulé') return false;
       }
       if (!showCancelled && !statut && f.Statut === 'Annulé') return false;
-      if (entite && f.Entite !== entite) return false;
-      if (cat && f.Categorie !== cat) return false;
       if (statut && f.Statut !== statut) return false;
       if (lib && d.library.name !== lib) return false;
       if (!needle) return true;
-      return [f.DocCode, f.Title, f.Contrepartie, f.SousCategorie, f.Signataires, f.ResumeIA, d.fileName]
-        .filter(Boolean)
-        .some((v) => v!.toLowerCase().includes(needle));
+      return strip([
+        f.DocCode, f.Title, f.Entite, f.Categorie, f.SousCategorie, f.Contrepartie,
+        f.Signataires, f.ResumeIA, f.Statut, d.fileName, fmtDate(f.DateSignature), fmtDate(f.DateEcheance),
+      ].filter(Boolean).join(' ')).includes(needle);
     });
+  }, [docs, q, tab, showCancelled, statut, lib]);
+
+  const filtered = useMemo(() => {
     const val = (d: DocItem): string => {
       const f = d.fields;
       switch (sort.key) {
         case 'code': return f.DocCode ?? '';
-        case 'title': return (f.Title ?? '').toLowerCase();
+        case 'title': return f.Title ?? '';
         case 'entite': return f.Entite ?? '';
         case 'categorie': return f.Categorie ?? '';
         case 'statut': return f.Statut ?? '';
@@ -72,130 +101,247 @@ export default function DocumentList({ docs, libs, tab, preset, selectedKey, onS
         default: return d.created;
       }
     };
-    return rows.sort((a, b) => (sort.asc ? 1 : -1) * val(a).localeCompare(val(b)));
-  }, [docs, q, entite, cat, statut, lib, tab, showCancelled, sort]);
+    return base.filter((d) => (!entite || tidy(d.fields.Entite) === entite)
+      && (!cat || tidy(d.fields.Categorie) === cat)
+      && (!sub || tidy(d.fields.SousCategorie) === sub))
+      .sort((a, b) => (sort.asc ? 1 : -1) * val(a).localeCompare(val(b), 'fr'));
+  }, [base, entite, cat, sub, sort]);
+
+  const entities = useMemo(() => ordered([...new Set(base.map((d) => tidy(d.fields.Entite)))], ENTITIES), [base]);
+  const categories = useMemo(() => ordered([...new Set(base.map((d) => tidy(d.fields.Categorie)))], CATEGORIES), [base]);
+  const count = (entity = '', category = '', subcategory = '') => base.filter((d) =>
+    (!entity || tidy(d.fields.Entite) === entity)
+    && (!category || tidy(d.fields.Categorie) === category)
+    && (!subcategory || tidy(d.fields.SousCategorie) === subcategory)).length;
+
+  const selectPath = (entity: string, category: string, subcategory = '') => {
+    setEntite(entity);
+    setCat(category);
+    setSub(subcategory);
+  };
+  const isExpanded = (id: string) => !!expanded[id];
+  const toggle = (id: string) => setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
+  const clearAll = () => { setQ(''); selectPath('', ''); setStatut(''); setLib(''); setShowCancelled(false); };
+  const filtersActive = !!(q || entite || cat || sub || statut || lib);
+  const selectFolder = (entity: string, category: string, subcategory: string) => {
+    selectPath(entity, category, subcategory);
+  };
+
+  function treeRow(id: string, label: string, total: number, depth: number, active: boolean,
+    path: { entity: string; category: string; sub: string }, hasChildren: boolean) {
+    return (
+      <div key={id} className={`catalog-tree-row${active ? ' active' : ''}`} style={{ paddingLeft: `${depth * 14 + 6}px` }}>
+        {hasChildren ? (
+          <button type="button" className="catalog-tree-arrow" aria-label={`${isExpanded(id) ? 'Replier' : 'Déplier'} ${label}`} aria-expanded={isExpanded(id)} onClick={() => toggle(id)}>
+            {isExpanded(id) ? '▾' : '▸'}
+          </button>
+        ) : <span className="catalog-tree-arrow-spacer" />}
+        <button type="button" className="catalog-tree-name" title={label} onClick={() => selectFolder(path.entity, path.category, path.sub)}>
+          <span>{depth === 0 ? '📁' : hasChildren ? '📂' : '📄'}</span>
+          <span className="catalog-tree-label">{label}</span>
+        </button>
+        <span className="catalog-tree-count">{total}</span>
+      </div>
+    );
+  }
 
   const th = (key: SortKey, label: string) => (
-    <th onClick={() => setSort((s) => ({ key, asc: s.key === key ? !s.asc : true }))}>
-      {label}
-      {sort.key === key ? (sort.asc ? ' ▲' : ' ▼') : ''}
+    <th key={key} onClick={() => setSort((s) => ({ key, asc: s.key === key ? !s.asc : true }))}>
+      {label}{sort.key === key ? (sort.asc ? ' ▲' : ' ▼') : ''}
     </th>
   );
 
-  const anyFilter = q || entite || cat || statut || lib;
-
   return (
-    <div className="card" style={{ marginTop: 16 }}>
-      <div className="filters">
-        <div className="search">
-          <input placeholder="Rechercher un code, un objet, une contrepartie, un résumé…" value={q} onChange={(e) => setQ(e.target.value)} />
+    <div className="card catalog-card">
+      <div className="catalog-toolbar">
+        <div className="catalog-search">
+          <span aria-hidden="true">⌕</span>
+          <input type="search" aria-label="Rechercher un document" placeholder="Rechercher un contrat, une contrepartie, un code, un résumé IA…" value={q} onChange={(e) => setQ(e.target.value)} />
+          {q && <button type="button" title="Effacer la recherche" onClick={() => setQ('')}>✕</button>}
         </div>
-        <select value={cat} onChange={(e) => setCat(e.target.value)}>
-          <option value="">Toutes catégories</option>
-          {CATEGORIES.map((x) => (
-            <option key={x}>{x}</option>
-          ))}
-        </select>
-        <select value={statut} onChange={(e) => setStatut(e.target.value)}>
+        <div className="catalog-view-switch" role="group" aria-label="Type de vue">
+          <button className={view === 'explorer' ? 'on' : ''} onClick={() => setView('explorer')}>▦ Explorateur</button>
+          <button className={view === 'table' ? 'on' : ''} onClick={() => setView('table')}>☷ Tableau</button>
+        </div>
+      </div>
+      <div className="catalog-filter-bar">
+        <select aria-label="Statut" value={statut} onChange={(e) => setStatut(e.target.value)}>
           <option value="">Tous statuts</option>
-          {STATUTS.map((x) => (
-            <option key={x}>{x}</option>
-          ))}
+          {STATUTS.map((s) => <option key={s}>{s}</option>)}
         </select>
         {libs.some((l) => l.name === RESTRICTED) && (
-          <select value={lib} onChange={(e) => setLib(e.target.value)}>
+          <select aria-label="Bibliothèque SharePoint" value={lib} onChange={(e) => setLib(e.target.value)}>
             <option value="">Toutes bibliothèques</option>
-            {libs.map((l) => (
-              <option key={l.name}>{l.name}</option>
-            ))}
+            {libs.map((l) => <option key={l.name}>{l.name}</option>)}
           </select>
         )}
-        {anyFilter && (
-          <button className="link-btn" onClick={() => { setQ(''); setEntite(''); setCat(''); setStatut(''); setLib(''); }}>
-            Effacer les filtres
-          </button>
-        )}
-      </div>
-      <div className="filters">
-        <div className="chips">
-          <button className={`chip${!entite ? ' on' : ''}`} onClick={() => setEntite('')}>
-            Toutes entités
-          </button>
-          {entityChips.map((e) => (
-            <button key={e} className={`chip${entite === e ? ' on' : ''}`} onClick={() => setEntite(entite === e ? '' : e)}>
-              {e}
-            </button>
-          ))}
-        </div>
-        <label className="small muted" style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
-          <input type="checkbox" checked={showCancelled} onChange={(e) => setShowCancelled(e.target.checked)} /> Afficher les annulés
-        </label>
+        <label className="catalog-cancelled"><input type="checkbox" checked={showCancelled} onChange={(e) => setShowCancelled(e.target.checked)} /> Inclure les annulés</label>
+        {filtersActive && <button type="button" className="link-btn" onClick={clearAll}>Effacer les filtres</button>}
+        <span className="catalog-total">{filtered.length} / {base.length} document(s)</span>
       </div>
 
-      {filtered.length ? (
-        <div className="table-wrap">
-          <table className="grid">
-            <thead>
-              <tr>
-                {th('code', 'Code')}
-                {th('title', 'Objet')}
-                {th('entite', 'Entité')}
-                {th('categorie', 'Catégorie')}
-                <th>Contrepartie</th>
-                {th('statut', 'Statut')}
-                {th('signature', 'Signé le')}
-                {th('echeance', 'Échéance')}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((d) => {
-                const key = `${d.library.name}/${d.itemId}`;
+      {view === 'explorer' ? (
+        <div className="catalog-layout">
+          <aside className="catalog-sidebar" aria-label="Arborescence documentaire">
+            <div className="catalog-sidebar-title">Explorer par</div>
+            <div className="catalog-tree-mode" role="group" aria-label="Ordre de classement">
+              <button className={treeMode === 'entity' ? 'on' : ''} onClick={() => { setTreeMode('entity'); selectPath('', ''); }}>Entité</button>
+              <button className={treeMode === 'category' ? 'on' : ''} onClick={() => { setTreeMode('category'); selectPath('', ''); }}>Catégorie</button>
+            </div>
+            <div className="catalog-tree" role="navigation" aria-label="Classement des documents">
+              {treeRow('all', 'Tous les documents', base.length, 0, !entite && !cat && !sub,
+                { entity: '', category: '', sub: '' }, false)}
+              {treeMode === 'entity' ? entities.map((e) => {
+                const eRows = base.filter((d) => tidy(d.fields.Entite) === e);
+                const eCats = ordered([...new Set(eRows.map((d) => tidy(d.fields.Categorie)))], CATEGORIES);
+                const eId = `e:${e}`;
+                return (
+                  <div key={eId}>
+                    {treeRow(eId, displayName(e, 'entity'), eRows.length, 0, entite === e && !cat,
+                      { entity: e, category: '', sub: '' }, true)}
+                    {isExpanded(eId) && eCats.map((c) => {
+                      const cRows = eRows.filter((d) => tidy(d.fields.Categorie) === c);
+                      const subs = ordered([...new Set(cRows.map((d) => tidy(d.fields.SousCategorie)))], []);
+                      const cId = `${eId}:c:${c}`;
+                      return (
+                        <div key={cId}>
+                          {treeRow(cId, displayName(c, 'category'), cRows.length, 1, entite === e && cat === c && !sub,
+                            { entity: e, category: c, sub: '' }, true)}
+                          {isExpanded(cId) && subs.map((s) => treeRow(`${cId}:s:${s}`, displayName(s, 'sub'), count(e, c, s), 2,
+                            entite === e && cat === c && sub === s, { entity: e, category: c, sub: s }, false))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              }) : categories.map((c) => {
+                const cRows = base.filter((d) => tidy(d.fields.Categorie) === c);
+                const cEntities = ordered([...new Set(cRows.map((d) => tidy(d.fields.Entite)))], ENTITIES);
+                const cId = `c:${c}`;
+                return (
+                  <div key={cId}>
+                    {treeRow(cId, displayName(c, 'category'), cRows.length, 0, !entite && cat === c,
+                      { entity: '', category: c, sub: '' }, true)}
+                    {isExpanded(cId) && cEntities.map((e) => {
+                      const eRows = cRows.filter((d) => tidy(d.fields.Entite) === e);
+                      const subs = ordered([...new Set(eRows.map((d) => tidy(d.fields.SousCategorie)))], []);
+                      const eId = `${cId}:e:${e}`;
+                      return (
+                        <div key={eId}>
+                          {treeRow(eId, displayName(e, 'entity'), eRows.length, 1, entite === e && cat === c && !sub,
+                            { entity: e, category: c, sub: '' }, true)}
+                          {isExpanded(eId) && subs.map((s) => treeRow(`${eId}:s:${s}`, displayName(s, 'sub'), count(e, c, s), 2,
+                            entite === e && cat === c && sub === s, { entity: e, category: c, sub: s }, false))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+              {!base.length && <div className="catalog-tree-empty">Aucun dossier pour les filtres choisis.</div>}
+            </div>
+            <div className="catalog-sidebar-tip">Classement virtuel basé sur les métadonnées SharePoint. Aucun fichier n'est déplacé.</div>
+          </aside>
+          <section className="catalog-content" aria-label="Documents du dossier">
+            <div className="catalog-breadcrumb">
+              <button onClick={() => selectPath('', '')}>Tous les documents</button>
+              {entite && <><span>›</span><button onClick={() => selectPath(entite, '')}>{displayName(entite, 'entity')}</button></>}
+              {cat && <><span>›</span><button onClick={() => selectPath(entite, cat)}>{displayName(cat, 'category')}</button></>}
+              {sub && <><span>›</span><span className="catalog-breadcrumb-current">{displayName(sub, 'sub')}</span></>}
+            </div>
+            <div className="catalog-content-head">
+              <div><strong>{sub ? displayName(sub, 'sub') : cat ? displayName(cat, 'category') : entite ? displayName(entite, 'entity') : 'Bibliothèque du groupe'}</strong>
+                <span>{filtered.length} document(s) · PDF et contrats accessibles</span></div>
+              <select aria-label="Trier les résultats" value={`${sort.key}:${sort.asc ? 'asc' : 'desc'}`}
+                onChange={(e) => { const [key, order] = e.target.value.split(':'); setSort({ key: key as SortKey, asc: order === 'asc' }); }}>
+                <option value="created:desc">Plus récents</option>
+                <option value="title:asc">Objet A → Z</option>
+                <option value="echeance:asc">Échéances proches</option>
+                <option value="code:asc">Code A → Z</option>
+              </select>
+            </div>
+            {filtered.length ? (
+              <div className="catalog-document-list">
+                {filtered.map((d) => {
+                  const f = d.fields;
+                  const n = f.Statut === 'Annulé' ? null : daysUntil(f.DateEcheance);
+                  const key = keyOf(d);
+                  return (
+                    <button key={key} type="button" className={`catalog-document${selectedKey === key ? ' selected' : ''}`}
+                      onClick={() => onSelect(key)} aria-label={`Ouvrir ${f.Title || d.fileName}`}>
+                      <div className="catalog-document-icon" aria-hidden="true">📄</div>
+                      <div className="catalog-document-main">
+                        <div className="catalog-document-title">{f.Title || d.fileName}</div>
+                        <div className="catalog-document-meta">
+                          <span className="code">{f.DocCode || 'Sans code'}</span>
+                          <span>{f.Entite || 'Sans entité'}</span>
+                          {f.Contrepartie && <span>{f.Contrepartie}</span>}
+                          {d.library.name === RESTRICTED && <span>🔒 Confidentiel</span>}
+                        </div>
+                        {f.ResumeIA && <div className="catalog-document-summary">{f.ResumeIA}</div>}
+                        <div className="catalog-document-category">{displayName(tidy(f.Categorie), 'category')}{f.SousCategorie ? ` / ${f.SousCategorie}` : ''}</div>
+                      </div>
+                      <div className="catalog-document-side">
+                        <Badge tone={STATUT_TONE[f.Statut ?? ''] ?? 'grey'}>{f.Statut || 'Sans statut'}</Badge>
+                        {f.DateEcheance && <span className={`catalog-document-due${n !== null && n < 0 ? ' late' : n !== null && n <= 90 ? ' soon' : ''}`}>
+                          Échéance : {fmtDate(f.DateEcheance)}
+                        </span>}
+                        <span className="catalog-document-open">Voir la fiche ›</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : <EmptyState icon={docs.length ? '🔎' : '🗂️'} title={docs.length ? 'Aucun document dans cette sélection' : 'Le registre est vide'}
+              sub={docs.length ? 'Changez de dossier ou effacez les filtres.' : 'Déposez votre premier document.'} />}
+          </section>
+        </div>
+      ) : (
+        <>
+          <div className="catalog-table-shortcuts">
+            <div className="chips">
+              <button className={`chip${!entite ? ' on' : ''}`} onClick={() => selectPath('', cat, '')}>Toutes entités</button>
+              {ordered([...new Set(docs.map((d) => tidy(d.fields.Entite)))], ENTITIES).map((e) => (
+                <button key={e} className={`chip${entite === e ? ' on' : ''}`} onClick={() => selectPath(entite === e ? '' : e, cat, '')}>
+                  {displayName(e, 'entity')}
+                </button>
+              ))}
+            </div>
+            <select aria-label="Catégorie" value={cat} onChange={(e) => selectPath(entite, e.target.value, '')}>
+              <option value="">Toutes catégories</option>
+              {ordered([...new Set(docs.map((d) => tidy(d.fields.Categorie)))], CATEGORIES).map((c) => (
+                <option key={c} value={c}>{displayName(c, 'category')}</option>
+              ))}
+            </select>
+          </div>
+          {filtered.length ? (
+            <div className="table-wrap"><table className="grid">
+              <thead><tr>{th('code', 'Code')}{th('title', 'Objet')}{th('entite', 'Entité')}{th('categorie', 'Catégorie')}<th>Contrepartie</th>{th('statut', 'Statut')}{th('signature', 'Signé le')}{th('echeance', 'Échéance')}</tr></thead>
+              <tbody>{filtered.map((d) => {
+                const key = keyOf(d);
                 const f = d.fields;
                 const n = f.Statut === 'Annulé' ? null : daysUntil(f.DateEcheance);
                 return (
                   <tr key={key} className={key === selectedKey ? 'sel' : ''} onClick={() => onSelect(key)}>
-                    <td>
-                      <span className="code">{f.DocCode ?? '—'}</span>
-                      {d.library.name === RESTRICTED && (
-                        <>
-                          {' '}
-                          <Badge tone="violet" small>🔒 confidentiel</Badge>
-                        </>
-                      )}
-                    </td>
-                    <td>
-                      <div className="cell-title">{f.Title}</div>
-                      {f.ResumeIA && <div className="cell-sub">{f.ResumeIA.slice(0, 90)}{f.ResumeIA.length > 90 ? '…' : ''}</div>}
-                    </td>
+                    <td><span className="code">{f.DocCode ?? '—'}</span>{d.library.name === RESTRICTED && <Badge tone="violet" small>🔒</Badge>}</td>
+                    <td><div className="cell-title">{f.Title || d.fileName}</div>{f.ResumeIA && <div className="cell-sub">{f.ResumeIA.slice(0, 90)}{f.ResumeIA.length > 90 ? '…' : ''}</div>}</td>
                     <td>{f.Entite}</td>
-                    <td>
-                      <div>{f.Categorie?.replace(/^\d+ — /, '')}</div>
-                      {f.SousCategorie && <div className="cell-sub">{f.SousCategorie}</div>}
-                    </td>
+                    <td><div>{displayName(tidy(f.Categorie), 'category')}</div>{f.SousCategorie && <div className="cell-sub">{f.SousCategorie}</div>}</td>
                     <td>{f.Contrepartie}</td>
-                    <td>
-                      <Badge tone={STATUT_TONE[f.Statut ?? ''] ?? 'grey'}>{f.Statut}</Badge>
-                    </td>
+                    <td><Badge tone={STATUT_TONE[f.Statut ?? ''] ?? 'grey'}>{f.Statut}</Badge></td>
                     <td>{fmtDate(f.DateSignature)}</td>
-                    <td className={n !== null && n < 0 ? 'late' : n !== null && n <= 90 ? 'soon' : ''}>
-                      {fmtDate(f.DateEcheance)}
+                    <td className={n !== null && n < 0 ? 'late' : n !== null && n <= 90 ? 'soon' : ''}>{fmtDate(f.DateEcheance)}
                       {n !== null && n < 0 && <div className="cell-sub late">dépassée</div>}
                       {n !== null && n >= 0 && n <= 90 && <div className="cell-sub soon">dans {n} j</div>}
                     </td>
                   </tr>
                 );
-              })}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <EmptyState
-          icon={docs.length ? '🔎' : '🗂️'}
-          title={docs.length ? 'Aucun document ne correspond' : 'Le registre est vide'}
-          sub={docs.length ? 'Modifiez les filtres ou la recherche.' : 'Déposez un premier document avec le bouton « Déposer un document ».'}
-        />
+              })}</tbody>
+            </table></div>
+          ) : <EmptyState icon={docs.length ? '🔎' : '🗂️'} title={docs.length ? 'Aucun document ne correspond' : 'Le registre est vide'} sub="Modifiez les filtres ou la recherche." />}
+        </>
       )}
-      {filtered.length > 0 && <div className="table-foot">{filtered.length} document(s) affiché(s) sur {docs.length}</div>}
+      <div className="table-foot">{filtered.length} document(s) affiché(s) sur {docs.length}. Recherche dans les métadonnées et résumés IA, pas encore dans le texte complet des PDF.</div>
     </div>
   );
 }
