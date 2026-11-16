@@ -1,5 +1,5 @@
 import { config, DOC_LIBRARIES, RESTRICTED } from './config';
-import { gGet, gGetAll, gPutBytes, gSend } from './graph';
+import { GraphError, gDelete, gGet, gGetAll, gPutBytes, gSend } from './graph';
 import { stampPdf, toBase64 } from './pdf';
 import { currentEmail } from './auth';
 
@@ -386,4 +386,183 @@ export async function getVersions(doc: DocItem): Promise<DocVersion[]> {
     `/drives/${doc.library.driveId}/items/${doc.driveItemId}/versions`,
   );
   return v.map((x) => ({ id: x.id, lastModifiedDateTime: x.lastModifiedDateTime, size: x.size, by: x.lastModifiedBy?.user?.displayName ?? '' }));
+}
+
+
+// ---------- controlled confidentiality escalation ----------
+// Only entity -> Restricted is supported. Reverse moves require an admin workflow.
+// Graph copy with includeAllVersionHistory avoids SharePoint Move-to limitations
+// caused by lookup/unique columns; the list metadata MUST be restored separately.
+
+type CopyDriveItem = {
+  id: string;
+  name: string;
+  size: number;
+  eTag?: string;
+  webUrl?: string;
+  lastModifiedDateTime?: string;
+  '@microsoft.graph.downloadUrl'?: string;
+};
+
+export interface ConfidentialityResult {
+  code: string;
+  auditRecorded: boolean;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function findAtRoot(driveId: string, name: string): Promise<CopyDriveItem | null> {
+  try {
+    return await gGet<CopyDriveItem>(`/drives/${driveId}/root:/${encodeURIComponent(name)}`);
+  } catch (err) {
+    if (err instanceof GraphError && err.status === 404) return null;
+    throw err;
+  }
+}
+
+async function countVersions(driveId: string, id: string): Promise<number> {
+  const entries = await gGetAll<{ id: string }>(`/drives/${driveId}/items/${id}/versions?$select=id`);
+  return Math.max(1, entries.length);
+}
+
+async function contentHash(driveId: string, id: string): Promise<string> {
+  const item = await gGet<CopyDriveItem>(`/drives/${driveId}/items/${id}`);
+  const url = item['@microsoft.graph.downloadUrl'];
+  if (!url) throw new Error('Microsoft Graph ne fournit pas le lien de v\u00e9rification du PDF.');
+  // No authorization header for a preauthenticated downloadUrl.
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Lecture du PDF impossible (${response.status}).`);
+  const digest = await crypto.subtle.digest('SHA-256', await response.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (x) => x.toString(16).padStart(2, '0')).join('');
+}
+
+async function logConfidentialityMove(code: string, source: string): Promise<boolean> {
+  try {
+    const siteId = await getSiteId();
+    const lists = await gGetAll<GList>(`/sites/${siteId}/lists?$select=id,name,displayName`);
+    const audit = lists.find((x) => (x.name || x.displayName || '').toLowerCase() === 'documentauditlog');
+    if (!audit) return false;
+    const title = `CONFIDENTIALITY_UPGRADE | ${code} | ${source}>Restricted | ${currentEmail()} | ${new Date().toISOString()}`;
+    await gSend('POST', `/sites/${siteId}/lists/${audit.id}/items`, { fields: { Title: title.slice(0, 255) } });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Copies one unlinked document to Restricted, checks file and version history,
+ * restores the registered metadata, and deletes the original with If-Match.
+ * If a check fails, the original remains in its source library.
+ */
+export async function makeDocumentConfidential(
+  doc: DocItem,
+  restricted: Library,
+  progress: (message: string) => void = () => {},
+): Promise<ConfidentialityResult> {
+  if (doc.library.name === RESTRICTED) throw new Error('Le document est d\u00e9j\u00e0 confidentiel.');
+  if (restricted.name !== RESTRICTED || doc.library.driveId === restricted.driveId) {
+    throw new Error('Biblioth\u00e8que Restricted invalide.');
+  }
+  progress('Contr\u00f4le du document et de ses relations...');
+  // Read live data, not the snapshot retained by the React page.
+  const sourceDocs = await loadDocuments(doc.library);
+  const current = sourceDocs.find((x) => x.itemId === doc.itemId);
+  if (!current) throw new Error('Document source introuvable. Actualisez le registre.');
+  if (!current.fields.DocCode || !current.fields.Entite || !current.fields.Title) {
+    throw new Error('La fiche source est incompl\u00e8te : code, entit\u00e9 ou objet manquant.');
+  }
+  if (current.fields.DocumentParentLookupId || sourceDocs.some((x) => String(x.fields.DocumentParentLookupId || '') === current.itemId)) {
+    throw new Error('Document li\u00e9 \u00e0 un autre document : reclassement bloqu\u00e9 pour ne pas rompre les relations.');
+  }
+  if (doc.modified && Date.parse(doc.modified) !== Date.parse(current.modified)) {
+    throw new Error('La fiche a chang\u00e9 depuis son ouverture. Actualisez avant le transfert.');
+  }
+  const original = await gGet<CopyDriveItem>(`/drives/${doc.library.driveId}/items/${doc.driveItemId}`);
+  if (!original.eTag || original.name !== current.fileName || original.size !== current.size) {
+    throw new Error('La version source ne correspond plus \u00e0 la fiche affich\u00e9e. Actualisez.');
+  }
+  if (original.size > 100 * 1024 * 1024) {
+    throw new Error('PDF sup\u00e9rieur \u00e0 100 Mo : transfert manuel contr\u00f4l\u00e9 requis.');
+  }
+
+  const targetDocs = await loadDocuments(restricted);
+  const matchingCode = targetDocs.find((x) => x.fields.DocCode === current.fields.DocCode);
+  if (matchingCode && matchingCode.fileName !== current.fileName) {
+    throw new Error(`Le code ${current.fields.DocCode} existe d\u00e9j\u00e0 dans Restricted sur un autre fichier.`);
+  }
+
+  progress('Contr\u00f4le des versions et du fichier cible...');
+  const versionCount = await countVersions(doc.library.driveId, doc.driveItemId);
+  let target = await findAtRoot(restricted.driveId, current.fileName);
+  if (target) {
+    // Permit resuming a prior completed copy, but never adopt an unrelated file.
+    const targetRecord = targetDocs.find((x) => x.driveItemId === target!.id);
+    if (!targetRecord || targetRecord.fields.DocCode !== current.fields.DocCode) {
+      throw new Error('Un fichier de m\u00eame nom existe dans Restricted. Aucun \u00e9crasement effectu\u00e9.');
+    }
+  } else {
+    progress('Copie SharePoint de toutes les versions vers Restricted...');
+    const root = await gGet<{ id: string }>(`/drives/${restricted.driveId}/root?$select=id`);
+    // Do NOT specify a new name: Graph may otherwise ignore includeAllVersionHistory.
+    await gSend('POST', `/drives/${doc.library.driveId}/items/${doc.driveItemId}/copy?includeAllVersionHistory=true`, {
+      parentReference: { driveId: restricted.driveId, id: root.id },
+    });
+  }
+
+  // Copy is asynchronous (202 Accepted); seeing the target file alone is not
+  // sufficient to prove that version history has been copied.
+  const deadline = Date.now() + 120_000;
+  let count = 0;
+  while (Date.now() < deadline) {
+    target = await findAtRoot(restricted.driveId, current.fileName);
+    if (target && target.size === original.size) {
+      try { count = await countVersions(restricted.driveId, target.id); }
+      catch (e) { if (!(e instanceof GraphError) || e.status !== 404) throw e; }
+      if (count >= versionCount) break;
+    }
+    await sleep(2500);
+  }
+  if (!target || target.size !== original.size || count < versionCount) {
+    throw new Error('Copie ou historique incomplet dans Restricted. Source conserv\u00e9e ; v\u00e9rifiez la copie dans SharePoint.');
+  }
+
+  progress('V\u00e9rification SHA-256 du PDF...');
+  const [before, after] = await Promise.all([
+    contentHash(doc.library.driveId, doc.driveItemId),
+    contentHash(restricted.driveId, target.id),
+  ]);
+  if (before !== after) throw new Error('Le contr\u00f4le SHA-256 a \u00e9chou\u00e9. Original conserv\u00e9.');
+
+  progress('Recr\u00e9ation des m\u00e9tadonn\u00e9es du registre...');
+  const listItem = await gGet<{ id: string }>(`/drives/${restricted.driveId}/items/${target.id}/listItem?$select=id`);
+  // The lookup is deliberately excluded; linked documents were blocked above.
+  const restored: Record<string, unknown> = {};
+  for (const field of FIELD_NAMES) {
+    if (field === 'DocumentParentLookupId') continue;
+    restored[field] = current.fields[field as keyof DocFields] ?? null;
+  }
+  await updateFields({ library: restricted, itemId: listItem.id }, restored);
+  const siteId = await getSiteId();
+  const saved = await gGet<DocFields>(`/sites/${siteId}/lists/${restricted.listId}/items/${listItem.id}/fields`);
+  const required: (keyof DocFields)[] = ['DocCode', 'Title', 'Entite', 'Categorie', 'SousCategorie', 'Contrepartie', 'Statut', 'ResumeIA'];
+  if (!required.every((key) => (saved[key] || '') === (current.fields[key] || ''))) {
+    throw new Error('Les m\u00e9tadonn\u00e9es de Restricted ne correspondent pas \u00e0 la source. Original conserv\u00e9.');
+  }
+
+  // Verify no source update happened while the async copy was in progress.
+  progress('Suppression conditionnelle de la copie d\u2019origine...');
+  try {
+    await gDelete(`/drives/${doc.library.driveId}/items/${doc.driveItemId}`, { 'If-Match': original.eTag });
+  } catch (error) {
+    throw new Error(`Copie v\u00e9rifi\u00e9e dans Restricted, mais SUPPRESSION DE L'ORIGINAL IMPOSSIBLE. ` +
+      `Le fichier reste potentiellement accessible dans ${doc.library.name}. ` +
+      `Supprimez l'original depuis SharePoint, puis contr\u00f4lez les acc\u00e8s. ` +
+      `D\u00e9tail: ${(error as Error).message}`);
+  }
+  const auditRecorded = await logConfidentialityMove(current.fields.DocCode, doc.library.name);
+  progress('Reclassement termin\u00e9.');
+  return { code: current.fields.DocCode, auditRecorded };
 }

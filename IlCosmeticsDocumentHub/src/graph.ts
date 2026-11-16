@@ -63,3 +63,8 @@ export async function gPutBytes<T>(path: string, data: ArrayBuffer | Uint8Array,
   const r = await raw(path, { method: 'PUT', body: data as BodyInit, headers: { 'Content-Type': contentType } });
   return (await r.json()) as T;
 }
+
+/** Delete with an optional If-Match guard to prevent removing a newer revision. */
+export async function gDelete(path: string, headers: Record<string, string> = {}): Promise<void> {
+  await raw(path, { method: 'DELETE', headers });
+}

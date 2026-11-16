@@ -7,6 +7,9 @@ import { Badge, Field, STATUT_TONE, Section } from '../ui';
 import {
   DocItem,
   DocVersion,
+  Library,
+  getLibraries,
+  makeDocumentConfidential,
   dateToField,
   fieldToDate,
   fmtDate,
@@ -41,6 +44,9 @@ export default function DocumentPanel({ doc, docs, onClose, onChanged, onOpen }:
   const [typeSignature, setTypeSignature] = useState(f.TypeSignature || 'Manuscrite');
   const [dateSignature, setDateSignature] = useState(fieldToDate(new Date().toISOString()));
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [confirmRestrict, setConfirmRestrict] = useState(false);
+  const [restrictedLibrary, setRestrictedLibrary] = useState<Library | null>(null);
+  const [privacyProgress, setPrivacyProgress] = useState('');
 
   const [versions, setVersions] = useState<DocVersion[]>([]);
   const [busy, setBusy] = useState('');
@@ -57,9 +63,21 @@ export default function DocumentPanel({ doc, docs, onClose, onChanged, onOpen }:
     setResume(f.ResumeIA ?? '');
     setTypeSignature(f.TypeSignature || 'Manuscrite');
     setConfirmCancel(false);
+    setConfirmRestrict(false);
+    setRestrictedLibrary(null);
+    setPrivacyProgress('');
     setError('');
     getVersions(doc).then(setVersions).catch(() => setVersions([]));
   }, [doc, f]);
+
+  useEffect(() => {
+    if (doc.library.name === RESTRICTED) return;
+    let active = true;
+    getLibraries().then((all) => {
+      if (active) setRestrictedLibrary(all.find((x) => x.name === RESTRICTED) ?? null);
+    }).catch(() => { if (active) setRestrictedLibrary(null); });
+    return () => { active = false; };
+  }, [doc.library.name]);
 
   const inRestricted = doc.library.name === RESTRICTED;
   const open = f.Statut === 'À signer' || f.Statut === 'Envoyé';
@@ -125,6 +143,26 @@ export default function DocumentPanel({ doc, docs, onClose, onChanged, onOpen }:
       return `${f.DocCode} annulé.`;
     });
 
+  const hasLinks = Boolean(f.DocumentParentLookupId) || children.length > 0;
+  async function restrictDocument() {
+    if (!restrictedLibrary || busy || hasLinks) return;
+    setBusy('restrict');
+    setError('');
+    setPrivacyProgress('');
+    try {
+      const result = await makeDocumentConfidential(doc, restrictedLibrary, setPrivacyProgress);
+      onClose();
+      onChanged(`Document ${result.code} déplacé dans Restricted et original supprimé.` +
+        (result.auditRecorded ? '' : ' Attention : vérifier le journal DocumentAuditLog (non renseigné).'));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy('');
+      setPrivacyProgress('');
+      setConfirmRestrict(false);
+    }
+  }
+
   const tone = STATUT_TONE[f.Statut ?? ''] ?? 'grey';
   return (
     <aside className="panel">
@@ -158,6 +196,56 @@ export default function DocumentPanel({ doc, docs, onClose, onChanged, onOpen }:
           <div className="info-row"><span className="info-label">Déposé</span><span className="info-value">{doc.createdBy} · {fmtDate(doc.created)}</span></div>
           <div className="info-row"><span className="info-label">Fichier</span><span className="info-value small">{doc.fileName}</span></div>
         </div>
+
+        <Section title="Confidentialité">
+          {inRestricted ? (
+            <div className="small muted">
+              🔒 Stockage dans Restricted. Le retour dans une bibliothèque standard
+              doit être validé par un administrateur ; cette action n'est pas disponible dans cette version.
+            </div>
+          ) : (
+            <div className="stack">
+              <div className="small muted">
+                Statut actuel : <strong>standard</strong> (bibliothèque {doc.library.name}).
+                Rendre confidentiel copie les versions dans Restricted, restaure la fiche,
+                contrôle l'intégrité du PDF puis supprime l'original.
+              </div>
+              {hasLinks && <div className="alert t-orange small">
+                Document avec relations parent/enfant : reclassement automatique bloqué.
+              </div>}
+              {!restrictedLibrary && <div className="small muted">
+                Bibliothèque Restricted non accessible depuis ce compte, ou chargement en cours.
+              </div>}
+              {privacyProgress && <div className="alert t-blue small" role="status">{privacyProgress}</div>}
+              {!confirmRestrict ? (
+                <div className="row">
+                  <button className="btn btn-ghost" disabled={!!busy || !restrictedLibrary || hasLinks}
+                    onClick={() => setConfirmRestrict(true)}>
+                    🔒 Rendre confidentiel
+                  </button>
+                </div>
+              ) : (
+                <div className="stack">
+                  <div className="alert t-orange small">
+                    Confirmer le reclassement de <strong>{f.DocCode}</strong> vers Restricted ?
+                    L'URL SharePoint et l'identifiant technique du fichier changeront.
+                    Le document restera accessible dans sa bibliothèque d'origine
+                    jusqu'à la fin des vérifications. La suppression sera envoyée dans la corbeille SharePoint.
+                  </div>
+                  <div className="row">
+                    <button className="btn btn-danger-solid" disabled={!!busy}
+                      onClick={() => void restrictDocument()}>
+                      {busy === 'restrict' ? 'Reclassement en cours...' : 'Confirmer et protéger'}
+                    </button>
+                    <button className="btn btn-ghost" disabled={!!busy} onClick={() => setConfirmRestrict(false)}>
+                      Annuler
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </Section>
 
         {open && (
           <Section title="Signature">
