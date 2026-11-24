@@ -279,3 +279,15 @@ table.grid { width: 100%; border-collapse: collapse; }
 .hub.is-current { font-size: 14.5px; font-weight: 800; color: #fff; letter-spacing: .01em; }
 a.hub:hover, a.hub:focus-visible { color: #fff; text-decoration: underline; text-underline-offset: 4px; }
 @media (max-width: 760px) { .hub { font-size: 11.5px; padding: 0 9px; } .hub.is-current { font-size: 13.5px; } }
+
+/* ── Dépôt multiple ────────────────────────────────────── */
+.dropzone.compact { padding: 12px; margin-top: 10px; font-size: 12.5px; }
+table.batch tbody tr { cursor: default; }
+table.batch tbody tr:hover { background: transparent; }
+table.batch td { vertical-align: top; }
+table.batch td.batch-file { max-width: 200px; word-break: break-word; font-size: 12px; font-weight: 600; }
+table.batch td.batch-file .badge { margin-top: 4px; }
+table.batch textarea { min-width: 220px; }
+table.batch .remove { background: none; border: none; color: var(--red); font-size: 16px; font-weight: 700; cursor: pointer; }
+.file-ok .badge { margin-left: 6px; }
+table.batch td input:not([type=date]) { min-width: 200px; }
