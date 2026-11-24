@@ -26,9 +26,11 @@ interface Props {
   onClose: () => void;
   onChanged: (message?: string) => void;
   onOpen: (key: string) => void;
+  /** Owners only: opens the move dialog for this document. */
+  onMove?: (doc: DocItem) => void;
 }
 
-export default function DocumentPanel({ doc, docs, onClose, onChanged, onOpen }: Props) {
+export default function DocumentPanel({ doc, docs, onClose, onChanged, onOpen, onMove }: Props) {
   const f = doc.fields;
   const [title, setTitle] = useState(f.Title ?? '');
   const [categorie, setCategorie] = useState(f.Categorie ?? '');
@@ -196,6 +198,22 @@ export default function DocumentPanel({ doc, docs, onClose, onChanged, onOpen }:
           <div className="info-row"><span className="info-label">Déposé</span><span className="info-value">{doc.createdBy} · {fmtDate(doc.created)}</span></div>
           <div className="info-row"><span className="info-label">Fichier</span><span className="info-value small">{doc.fileName}</span></div>
         </div>
+
+        {onMove && (
+          <Section title="Entité juridique">
+            <div className="stack">
+              <div className="small muted">
+                Document classé dans la mauvaise entité ? Le déplacement copie le fichier et son historique dans la bonne bibliothèque,
+                attribue un nouveau code, puis supprime l'original après contrôle.
+              </div>
+              <div className="row">
+                <button className="btn btn-ghost" disabled={!!busy} onClick={() => onMove(doc)}>
+                  ⇄ Déplacer vers une autre entité
+                </button>
+              </div>
+            </div>
+          </Section>
+        )}
 
         <Section title="Confidentialité">
           {inRestricted ? (

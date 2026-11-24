@@ -291,3 +291,7 @@ table.batch textarea { min-width: 220px; }
 table.batch .remove { background: none; border: none; color: var(--red); font-size: 16px; font-weight: 700; cursor: pointer; }
 .file-ok .badge { margin-left: 6px; }
 table.batch td input:not([type=date]) { min-width: 200px; }
+
+/* ── Déplacement entre entités ─────────────────────────── */
+.move-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 12px; background: var(--accent-soft); border-top: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); }
+.move-bar .btn { padding: 6px 12px; font-size: 12px; }

@@ -34,3 +34,10 @@ export const HUB_LINKS = [
 
 /** Liens vers les autres hubs : comptes internes uniquement (pas les invités B2B). */
 export const INTERNAL_EMAIL_DOMAIN = '@ilcosmetics.com';
+
+/**
+ * Comptes autorisés à déplacer des documents entre bibliothèques (= membres de
+ * SG-DocHub-Owners : le déplacement supprime l'original, ce qui exige le droit
+ * de suppression SharePoint). Le contrôle réel reste celui de SharePoint.
+ */
+export const MOVE_ADMIN_EMAILS: string[] = ['a.boyadjian@ilcosmetics.com'];

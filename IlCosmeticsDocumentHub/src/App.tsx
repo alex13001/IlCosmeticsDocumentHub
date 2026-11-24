@@ -3,11 +3,12 @@ import type { AccountInfo } from '@azure/msal-browser';
 import { currentEmail, initAuth, login, logout } from './auth';
 import { DocItem, Library, NoLibraryError, daysUntil, getLibraries, loadDocuments } from './docs';
 import { GraphError } from './graph';
-import { HUB_LINKS, INTERNAL_EMAIL_DOMAIN, RESTRICTED } from './config';
+import { HUB_LINKS, INTERNAL_EMAIL_DOMAIN, MOVE_ADMIN_EMAILS, RESTRICTED } from './config';
 import { EmptyState, StatTile } from './ui';
 import DocumentList, { Preset } from './components/DocumentList';
 import UploadDialog from './components/UploadDialog';
 import DocumentPanel from './components/DocumentPanel';
+import MoveDialog from './components/MoveDialog';
 
 type Tab = 'registre' | 'atraiter' | 'echeances';
 
@@ -21,6 +22,7 @@ export default function App() {
   const [toast, setToast] = useState('');
   const [showUpload, setShowUpload] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [moveDocs, setMoveDocs] = useState<DocItem[] | null>(null);
   const [tab, setTab] = useState<Tab>('registre');
   const [preset, setPreset] = useState<Preset>({});
 
@@ -113,6 +115,7 @@ export default function App() {
   }
 
   const showHubLinks = currentEmail().endsWith(INTERNAL_EMAIL_DOMAIN);
+  const canMove = MOVE_ADMIN_EMAILS.some((e) => e.toLowerCase() === currentEmail());
 
   const heroTitle = tab === 'registre' ? 'Bibliothèque documentaire' : tab === 'atraiter' ? 'Documents à traiter' : 'Échéances contractuelles';
   const heroSub =
@@ -195,7 +198,7 @@ export default function App() {
             />
           </div>
         ) : (
-          <DocumentList docs={docs} libs={libs} tab={tab} preset={preset} selectedKey={selectedKey} onSelect={setSelectedKey} />
+          <DocumentList docs={docs} libs={libs} tab={tab} preset={preset} selectedKey={selectedKey} onSelect={setSelectedKey} canMove={canMove} onMove={setMoveDocs} />
         )}
       </div>
 
@@ -222,6 +225,22 @@ export default function App() {
             void reload();
           }}
           onOpen={setSelectedKey}
+          onMove={canMove ? (d) => setMoveDocs([d]) : undefined}
+        />
+      )}
+
+      {moveDocs && (
+        <MoveDialog
+          docs={moveDocs}
+          all={docs}
+          libs={libs}
+          onClose={() => setMoveDocs(null)}
+          onDone={(msg) => {
+            setMoveDocs(null);
+            setSelectedKey(null);
+            setToast(msg);
+            void reload();
+          }}
         />
       )}
 

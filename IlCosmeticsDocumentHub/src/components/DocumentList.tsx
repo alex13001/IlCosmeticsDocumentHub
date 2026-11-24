@@ -17,6 +17,9 @@ interface Props {
   preset: Preset;
   selectedKey: string | null;
   onSelect: (key: string) => void;
+  /** Owners only: enables multi-selection and the move action (table view). */
+  canMove?: boolean;
+  onMove?: (docs: DocItem[]) => void;
 }
 
 type SortKey = 'code' | 'title' | 'entite' | 'categorie' | 'statut' | 'signature' | 'echeance' | 'created';
@@ -46,7 +49,8 @@ function ordered(values: string[], known: readonly string[]): string[] {
   });
 }
 
-export default function DocumentList({ docs, libs, tab, preset, selectedKey, onSelect }: Props) {
+export default function DocumentList({ docs, libs, tab, preset, selectedKey, onSelect, canMove = false, onMove }: Props) {
+  const [picked, setPicked] = useState<Set<string>>(new Set());
   const [q, setQ] = useState('');
   const [entite, setEntite] = useState('');
   const [cat, setCat] = useState('');
@@ -58,6 +62,11 @@ export default function DocumentList({ docs, libs, tab, preset, selectedKey, onS
   const [view, setView] = useState<ViewMode>('explorer');
   const [treeMode, setTreeMode] = useState<TreeMode>('entity');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+
+  // Drop selected keys that no longer exist after a reload (moved / deleted documents).
+  useEffect(() => {
+    setPicked((prev) => (prev.size ? new Set([...prev].filter((k) => docs.some((d) => keyOf(d) === k))) : prev));
+  }, [docs]);
 
   useEffect(() => {
     setStatut(preset.statut ?? '');
@@ -241,6 +250,11 @@ export default function DocumentList({ docs, libs, tab, preset, selectedKey, onS
               {!base.length && <div className="catalog-tree-empty">Aucun dossier pour les filtres choisis.</div>}
             </div>
             <div className="catalog-sidebar-tip">Classement virtuel basé sur les métadonnées SharePoint. Aucun fichier n'est déplacé.</div>
+            {canMove && (
+              <button type="button" className="link-btn" style={{ marginTop: 8 }} onClick={() => setView('table')}>
+                ⇄ Déplacer plusieurs documents : passer en vue Tableau
+              </button>
+            )}
           </aside>
           <section className="catalog-content" aria-label="Documents du dossier">
             <div className="catalog-breadcrumb">
@@ -314,15 +328,50 @@ export default function DocumentList({ docs, libs, tab, preset, selectedKey, onS
               ))}
             </select>
           </div>
+          {canMove && (
+            <div className="move-bar">
+              <span className="small">
+                {picked.size ? <><strong>{picked.size}</strong> document(s) sélectionné(s)</> : 'Cochez les documents mal classés pour les déplacer vers la bonne entité.'}
+              </span>
+              {picked.size > 0 && (
+                <>
+                  <button type="button" className="btn btn-primary" onClick={() => onMove?.(docs.filter((d) => picked.has(keyOf(d))))}>
+                    ⇄ Déplacer vers une autre entité
+                  </button>
+                  <button type="button" className="link-btn" onClick={() => setPicked(new Set())}>Tout désélectionner</button>
+                </>
+              )}
+            </div>
+          )}
           {filtered.length ? (
             <div className="table-wrap"><table className="grid">
-              <thead><tr>{th('code', 'Code')}{th('title', 'Objet')}{th('entite', 'Entité')}{th('categorie', 'Catégorie')}<th>Contrepartie</th>{th('statut', 'Statut')}{th('signature', 'Signé le')}{th('echeance', 'Échéance')}</tr></thead>
+              <thead><tr>{canMove && (
+                <th style={{ width: 32 }} onClick={(e) => e.stopPropagation()}>
+                  <input type="checkbox" aria-label="Tout sélectionner"
+                    checked={filtered.length > 0 && filtered.every((d) => picked.has(keyOf(d)))}
+                    onChange={(e) => setPicked((prev) => {
+                      const next = new Set(prev);
+                      filtered.forEach((d) => (e.target.checked ? next.add(keyOf(d)) : next.delete(keyOf(d))));
+                      return next;
+                    })} />
+                </th>
+              )}{th('code', 'Code')}{th('title', 'Objet')}{th('entite', 'Entité')}{th('categorie', 'Catégorie')}<th>Contrepartie</th>{th('statut', 'Statut')}{th('signature', 'Signé le')}{th('echeance', 'Échéance')}</tr></thead>
               <tbody>{filtered.map((d) => {
                 const key = keyOf(d);
                 const f = d.fields;
                 const n = f.Statut === 'Annulé' ? null : daysUntil(f.DateEcheance);
                 return (
                   <tr key={key} className={key === selectedKey ? 'sel' : ''} onClick={() => onSelect(key)}>
+                    {canMove && (
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <input type="checkbox" aria-label={`Sélectionner ${f.DocCode ?? ''}`} checked={picked.has(key)}
+                          onChange={(e) => setPicked((prev) => {
+                            const next = new Set(prev);
+                            if (e.target.checked) next.add(key); else next.delete(key);
+                            return next;
+                          })} />
+                      </td>
+                    )}
                     <td><span className="code">{f.DocCode ?? '—'}</span>{d.library.name === RESTRICTED && <Badge tone="violet" small>🔒</Badge>}</td>
                     <td><div className="cell-title">{f.Title || d.fileName}</div>{f.ResumeIA && <div className="cell-sub">{f.ResumeIA.slice(0, 90)}{f.ResumeIA.length > 90 ? '…' : ''}</div>}</td>
                     <td>{f.Entite}</td>
