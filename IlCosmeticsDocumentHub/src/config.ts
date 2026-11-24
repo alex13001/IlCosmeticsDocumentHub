@@ -16,7 +16,7 @@ export type Entity = (typeof ENTITIES)[number];
 export const RESTRICTED = 'Restricted';
 export const DOC_LIBRARIES: string[] = [...ENTITIES, RESTRICTED];
 
-export const STATUTS = ['À signer', 'Envoyé', 'Signé', 'Annulé'] as const;
+export const STATUTS = ['À signer', 'Envoyé', 'Signé', 'Sans signature', 'Annulé'] as const;
 export type Statut = (typeof STATUTS)[number];
 
 export const TYPES_SIGNATURE = ['Manuscrite', 'Électronique'] as const;

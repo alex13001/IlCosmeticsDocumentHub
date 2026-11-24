@@ -37,7 +37,7 @@ export default function UploadDialog({ libs, docs, onClose, onDone }: Props) {
 
   const [items, setItems] = useState<Item[]>([]);
   const [over, setOver] = useState(false);
-  const [mode, setMode] = useState<'aSigner' | 'signe'>('aSigner');
+  const [mode, setMode] = useState<'aSigner' | 'signe' | 'aucune'>('aSigner');
   const [entite, setEntite] = useState<string>(entityChoices[0] ?? '');
   const [categorie, setCategorie] = useState('');
   const [sousCategorie, setSousCategorie] = useState('');
@@ -133,7 +133,7 @@ export default function UploadDialog({ libs, docs, onClose, onDone }: Props) {
   if (open.some((i) => !i.title.trim())) problems.push(multi ? 'Renseignez l’objet de chaque fichier' : 'Renseignez l’objet');
   if (!categorie) problems.push('Choisissez la catégorie');
   if (mode === 'signe' && open.some((i) => !i.dateSignature)) problems.push(multi ? 'Renseignez la date de signature de chaque fichier' : 'Renseignez la date de signature');
-  if (signataires && !parseEmails(signataires).length) problems.push('E-mails des signataires invalides');
+  if (mode !== 'aucune' && signataires && !parseEmails(signataires).length) problems.push('E-mails des signataires invalides');
   if (!target) {
     problems.push(
       targetName === RESTRICTED
@@ -162,9 +162,9 @@ export default function UploadDialog({ libs, docs, onClose, onDone }: Props) {
           categorie,
           sousCategorie,
           contrepartie: contrepartie.trim(),
-          signataires: parseEmails(signataires).join('; '),
-          typeSignature: mode === 'signe' || signataires ? typeSignature : '',
-          origine: mode === 'signe' ? origine : 'Flux',
+          signataires: mode === 'aucune' ? '' : parseEmails(signataires).join('; '),
+          typeSignature: mode === 'aucune' ? '' : mode === 'signe' || signataires ? typeSignature : '',
+          origine: mode === 'aSigner' ? 'Flux' : origine,
           dateSignature: it.dateSignature,
           dateEffet,
           dateEcheance,
@@ -363,6 +363,10 @@ export default function UploadDialog({ libs, docs, onClose, onDone }: Props) {
                 <div className="mode-title">✅ Déjà signé</div>
                 <div className="mode-sub">Archivage d’un document signé. Le PDF n’est pas modifié.</div>
               </button>
+              <button type="button" className={`mode${mode === 'aucune' ? ' on' : ''}`} disabled={locked} onClick={() => setMode('aucune')}>
+                <div className="mode-title">📄 Pas de signature</div>
+                <div className="mode-sub">Rien à signer de notre côté (autorisation, certificat, courrier reçu). Archivé tel quel.</div>
+              </button>
             </div>
           </Section>
 
@@ -420,38 +424,40 @@ export default function UploadDialog({ libs, docs, onClose, onDone }: Props) {
             </div>
           </Section>
 
-          <Section title="Signature et dates">
+          <Section title={mode === 'aucune' ? 'Dates' : 'Signature et dates'}>
             <div className="grid3">
-              <Field label="Signataires (e-mails, séparés par ;)" full>
-                <input value={signataires} disabled={locked} onChange={(e) => setSignataires(e.target.value)} placeholder="jf.harpes@ilcosmetics.com" />
-              </Field>
-              <Field label="Type de signature">
-                <select value={typeSignature} disabled={locked} onChange={(e) => setTypeSignature(e.target.value)}>
-                  {TYPES_SIGNATURE.map((x) => (
-                    <option key={x}>{x}</option>
-                  ))}
-                </select>
-              </Field>
-              {mode === 'signe' && (
+              {mode !== 'aucune' && (
                 <>
-                  {single && (
-                    <Field label="Date de signature" required>
-                      <input type="date" value={single.dateSignature} disabled={locked} onChange={(e) => patch(single.id, { dateSignature: e.target.value })} />
-                    </Field>
-                  )}
-                  <Field label="Origine">
-                    <select value={origine} disabled={locked} onChange={(e) => setOrigine(e.target.value)}>
-                      {ORIGINES.map((x) => (
+                  <Field label="Signataires (e-mails, séparés par ;)" full>
+                    <input value={signataires} disabled={locked} onChange={(e) => setSignataires(e.target.value)} placeholder="jf.harpes@ilcosmetics.com" />
+                  </Field>
+                  <Field label="Type de signature">
+                    <select value={typeSignature} disabled={locked} onChange={(e) => setTypeSignature(e.target.value)}>
+                      {TYPES_SIGNATURE.map((x) => (
                         <option key={x}>{x}</option>
                       ))}
                     </select>
                   </Field>
                 </>
               )}
+              {mode === 'signe' && single && (
+                <Field label="Date de signature" required>
+                  <input type="date" value={single.dateSignature} disabled={locked} onChange={(e) => patch(single.id, { dateSignature: e.target.value })} />
+                </Field>
+              )}
+              {mode !== 'aSigner' && (
+                <Field label="Origine">
+                  <select value={origine} disabled={locked} onChange={(e) => setOrigine(e.target.value)}>
+                    {ORIGINES.map((x) => (
+                      <option key={x}>{x}</option>
+                    ))}
+                  </select>
+                </Field>
+              )}
               <Field label="Date d'effet">
                 <input type="date" value={dateEffet} disabled={locked} onChange={(e) => setDateEffet(e.target.value)} />
               </Field>
-              <Field label="Date d'échéance">
+              <Field label={mode === 'aucune' ? "Date d'échéance / d'expiration" : "Date d'échéance"}>
                 <input type="date" value={dateEcheance} disabled={locked} onChange={(e) => setDateEcheance(e.target.value)} />
               </Field>
             </div>

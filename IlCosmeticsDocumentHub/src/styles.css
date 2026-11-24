@@ -223,7 +223,7 @@ table.grid { width: 100%; border-collapse: collapse; }
 .file-ok { display: flex; align-items: center; gap: 10px; background: var(--green-soft); border: 1px solid var(--green-border); border-radius: 10px; padding: 10px 14px; color: var(--green); font-weight: 600; }
 .file-ok .remove { margin-left: auto; cursor: pointer; color: var(--red); font-size: 16px; font-weight: 700; background: none; border: none; }
 
-.modes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .mode { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; cursor: pointer; background: var(--card); text-align: left; }
 .mode.on { border-color: var(--accent-vivid); background: var(--hero-gradient); box-shadow: 0 0 0 2px var(--accent-border); }
 .mode-title { font-weight: 750; font-size: 13px; }

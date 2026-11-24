@@ -239,7 +239,8 @@ export interface NewDocument {
   library: Library;
   entite: string;
   file: File;
-  mode: 'aSigner' | 'signe';
+  /** aSigner: we must sign · signe: already signed · aucune: nothing for us to sign (e.g. ministry authorisation). */
+  mode: 'aSigner' | 'signe' | 'aucune';
   title: string;
   categorie: string;
   sousCategorie: string;
@@ -275,7 +276,7 @@ export async function createDocument(n: NewDocument): Promise<CreateResult> {
     SousCategorie: n.sousCategorie || null,
     Contrepartie: n.contrepartie || null,
     Signataires: n.signataires || null,
-    Statut: n.mode === 'signe' ? 'Signé' : 'À signer',
+    Statut: n.mode === 'signe' ? 'Signé' : n.mode === 'aucune' ? 'Sans signature' : 'À signer',
     TypeSignature: n.typeSignature || null,
     Origine: n.origine,
     DateSignature: n.mode === 'signe' ? dateToField(n.dateSignature) : null,

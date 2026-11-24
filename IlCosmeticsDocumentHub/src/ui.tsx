@@ -7,6 +7,7 @@ export const STATUT_TONE: Record<string, Tone> = {
   'À signer': 'orange',
   Envoyé: 'blue',
   Signé: 'green',
+  'Sans signature': 'grey',
   Annulé: 'grey',
 };
 
